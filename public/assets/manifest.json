@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "bundles": [
+    {
+      "id": "audio_music",
+      "assets": [
+        {
+          "id": "mus_stem_base",
+          "type": "audio",
+          "url": "assets/audio/music/mus_stem_base.{ext}",
+          "bytes": 207538
+        },
+        {
+          "id": "mus_stem_bass",
+          "type": "audio",
+          "url": "assets/audio/music/mus_stem_bass.{ext}",
+          "bytes": 170921
+        },
+        {
+          "id": "mus_stem_guitar",
+          "type": "audio",
+          "url": "assets/audio/music/mus_stem_guitar.{ext}",
+          "bytes": 281900
+        },
+        {
+          "id": "mus_stem_arp",
+          "type": "audio",
+          "url": "assets/audio/music/mus_stem_arp.{ext}",
+          "bytes": 221967
+        },
+        {
+          "id": "mus_stem_strings",
+          "type": "audio",
+          "url": "assets/audio/music/mus_stem_strings.{ext}",
+          "bytes": 208049
+        },
+        {
+          "id": "mus_stem_choir",
+          "type": "audio",
+          "url": "assets/audio/music/mus_stem_choir.{ext}",
+          "bytes": 231779
+        }
+      ]
+    },
+    {
+      "id": "audio_sfx",
+      "assets": [
+        {
+          "id": "sfx_footstep_grass",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_footstep_grass.{ext}",
+          "bytes": 2653
+        },
+        {
+          "id": "sfx_footstep_sand",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_footstep_sand.{ext}",
+          "bytes": 2674
+        },
+        {
+          "id": "sfx_footstep_stone",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_footstep_stone.{ext}",
+          "bytes": 2673
+        },
+        {
+          "id": "sfx_footstep_wood",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_footstep_wood.{ext}",
+          "bytes": 2680
+        },
+        {
+          "id": "sfx_footstep_metal",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_footstep_metal.{ext}",
+          "bytes": 2677
+        },
+        {
+          "id": "sfx_jump",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_jump.{ext}",
+          "bytes": 3863
+        },
+        {
+          "id": "sfx_land_soft",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_land_soft.{ext}",
+          "bytes": 2803
+        },
+        {
+          "id": "sfx_land_hard",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_land_hard.{ext}",
+          "bytes": 4411
+        },
+        {
+          "id": "sfx_parcel_pickup",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_parcel_pickup.{ext}",
+          "bytes": 8308
+        },
+        {
+          "id": "sfx_parcel_handoff",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_parcel_handoff.{ext}",
+          "bytes": 11346
+        },
+        {
+          "id": "sfx_shard_collect",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_shard_collect.{ext}",
+          "bytes": 6860
+        },
+        {
+          "id": "sfx_district_ignite",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_district_ignite.{ext}",
+          "bytes": 33258
+        },
+        {
+          "id": "sfx_ui_click",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_ui_click.{ext}",
+          "bytes": 1898
+        },
+        {
+          "id": "sfx_ui_hover",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_ui_hover.{ext}",
+          "bytes": 1546
+        },
+        {
+          "id": "sfx_ui_back",
+          "type": "audio",
+          "url": "assets/audio/sfx/sfx_ui_back.{ext}",
+          "bytes": 2421
+        }
+      ]
+    }
+  ]
+}

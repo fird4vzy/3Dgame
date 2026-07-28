@@ -1,0 +1,164 @@
+/**
+ * Design tokens. Restyling the game is this one file.
+ *
+ * The palette is derived from the illumination state: the interface literally
+ * warms up as the planet lights, which ties the UI to the core hook rather than
+ * floating above it (docs/10-ui-flow.md §10.5).
+ */
+:root {
+  --lp-dusk: #141724;
+  --lp-dusk-raised: #1c2032;
+  --lp-dusk-sunk: #0f1220;
+  --lp-ink: #eae6dc;
+  --lp-ink-soft: #a5aac0;
+  --lp-ink-faint: #757b93;
+  --lp-rule: #2b3048;
+  --lp-lumen: #e8a33a;
+  --lp-lumen-bright: #f6bd60;
+  --lp-lumen-wash: rgba(232, 163, 58, 0.14);
+  --lp-danger: #c8582f;
+
+  --lp-space-1: 4px;
+  --lp-space-2: 8px;
+  --lp-space-3: 12px;
+  --lp-space-4: 16px;
+  --lp-space-5: 24px;
+  --lp-space-6: 32px;
+
+  --lp-radius: 12px;
+  --lp-radius-sm: 8px;
+
+  --lp-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --lp-fast: 180ms;
+  --lp-slow: 240ms;
+
+  --lp-font-display: "Palatino Linotype", Palatino, "Iowan Old Style", Georgia, serif;
+  --lp-font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --lp-ui-scale: 1;
+}
+
+/* Every screen respects the player's motion preference, DOM and camera alike. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --lp-fast: 1ms;
+    --lp-slow: 1ms;
+  }
+}
+
+.lp-screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  pointer-events: auto;
+  font-family: var(--lp-font-body);
+  color: var(--lp-ink);
+  font-size: calc(16px * var(--lp-ui-scale));
+  padding: max(var(--lp-space-5), env(safe-area-inset-top))
+    max(var(--lp-space-5), env(safe-area-inset-right))
+    max(var(--lp-space-5), env(safe-area-inset-bottom))
+    max(var(--lp-space-5), env(safe-area-inset-left));
+}
+
+.lp-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 18, 32, 0.72);
+  backdrop-filter: blur(8px) saturate(0.7);
+}
+
+.lp-panel {
+  position: relative;
+  background: var(--lp-dusk-raised);
+  border: 1px solid var(--lp-rule);
+  border-radius: var(--lp-radius);
+  padding: var(--lp-space-5);
+  box-shadow: 0 20px 60px -30px rgba(0, 0, 0, 0.9);
+  max-width: 460px;
+  width: 100%;
+}
+
+.lp-title {
+  font-family: var(--lp-font-display);
+  font-weight: 400;
+  font-size: 2rem;
+  letter-spacing: 0.02em;
+  margin: 0 0 var(--lp-space-2);
+}
+
+.lp-sub {
+  color: var(--lp-ink-soft);
+  margin: 0 0 var(--lp-space-5);
+  font-size: 0.9rem;
+}
+
+.lp-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lp-space-2);
+}
+
+.lp-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lp-space-3);
+  /* 48px minimum touch target. */
+  min-height: 48px;
+  padding: 0 var(--lp-space-4);
+  border: 1px solid var(--lp-rule);
+  border-radius: var(--lp-radius-sm);
+  background: transparent;
+  color: var(--lp-ink);
+  font: inherit;
+  font-weight: 550;
+  cursor: pointer;
+  transition:
+    background var(--lp-fast) var(--lp-ease),
+    border-color var(--lp-fast) var(--lp-ease);
+}
+
+.lp-btn:hover {
+  background: var(--lp-lumen-wash);
+  border-color: var(--lp-lumen);
+}
+
+.lp-btn:focus-visible {
+  outline: 2px solid var(--lp-lumen);
+  outline-offset: 2px;
+}
+
+.lp-btn--primary {
+  background: var(--lp-lumen);
+  border-color: var(--lp-lumen);
+  color: #241d13;
+}
+
+.lp-btn--primary:hover {
+  background: var(--lp-lumen-bright);
+}
+
+.lp-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--lp-space-3);
+  min-height: 44px;
+}
+
+.lp-row label {
+  color: var(--lp-ink-soft);
+  font-size: 0.9rem;
+}
+
+.lp-row input[type="range"] {
+  width: 160px;
+  accent-color: var(--lp-lumen);
+}
+
+.lp-hint {
+  color: var(--lp-ink-faint);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  margin-top: var(--lp-space-4);
+}

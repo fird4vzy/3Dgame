@@ -1,0 +1,44 @@
+{
+  "atlasName": "char_ren_cypher",
+  "atlasWidth": 512,
+  "regions": [
+    {
+      "name": "turn",
+      "_comment": "HERO CHARACTER CONCEPT turnaround, 5 columns. Excludes the label bar below.",
+      "x": 322,
+      "y": 24,
+      "w": 488,
+      "h": 236,
+      "background": { "r": 140, "g": 140, "b": 140 },
+      "tolerance": 26,
+      "minGap": 4,
+      "minSize": 20,
+      "names": ["front", "front34", "side", "back", "back34"]
+    },
+    {
+      "name": "poseA",
+      "_comment": "ANIMATION POSES row 1. The two rows nearly touch, so each is its own region; the split at y=645 was found by profiling foreground density.",
+      "x": 323,
+      "y": 528,
+      "w": 480,
+      "h": 115,
+      "background": { "r": 140, "g": 140, "b": 140 },
+      "tolerance": 26,
+      "minGap": 4,
+      "minSize": 20,
+      "names": ["idle", "walk", "run", "jump", "land"]
+    },
+    {
+      "name": "poseB",
+      "_comment": "ANIMATION POSES row 2. A drone prop sits between two poses and segments as its own blob.",
+      "x": 323,
+      "y": 647,
+      "w": 480,
+      "h": 95,
+      "background": { "r": 140, "g": 140, "b": 140 },
+      "tolerance": 26,
+      "minGap": 4,
+      "minSize": 20
+    }
+  ]
+}

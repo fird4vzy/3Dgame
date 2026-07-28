@@ -1,0 +1,284 @@
+{
+  "id": "ren_cypher",
+  "displayName": "Ren 'Cypher' Kairo",
+  "height": 1.8,
+  "source": {
+    "kind": "spritesheet",
+    "url": "assets/characters/char_ren_cypher.png",
+    "worldHeight": 1.8,
+    "facing": "upright",
+    "frames": {
+      "front": {
+        "x": 2,
+        "y": 2,
+        "w": 112,
+        "h": 232,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "back34": {
+        "x": 116,
+        "y": 2,
+        "w": 102,
+        "h": 232,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "front34": {
+        "x": 220,
+        "y": 2,
+        "w": 99,
+        "h": 231,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "side": {
+        "x": 321,
+        "y": 2,
+        "w": 46,
+        "h": 230,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "back": {
+        "x": 369,
+        "y": 2,
+        "w": 56,
+        "h": 230,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "idle": {
+        "x": 427,
+        "y": 2,
+        "w": 46,
+        "h": 111,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "walk": {
+        "x": 2,
+        "y": 236,
+        "w": 55,
+        "h": 110,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "run": {
+        "x": 59,
+        "y": 236,
+        "w": 74,
+        "h": 109,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "jump": {
+        "x": 135,
+        "y": 236,
+        "w": 67,
+        "h": 109,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "land": {
+        "x": 204,
+        "y": 236,
+        "w": 86,
+        "h": 107,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "carry": {
+        "x": 292,
+        "y": 236,
+        "w": 68,
+        "h": 95,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "celebrate": {
+        "x": 362,
+        "y": 236,
+        "w": 54,
+        "h": 95,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "aim": {
+        "x": 418,
+        "y": 236,
+        "w": 84,
+        "h": 92,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "crouch": {
+        "x": 2,
+        "y": 348,
+        "w": 49,
+        "h": 89,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      },
+      "hurt": {
+        "x": 53,
+        "y": 348,
+        "w": 63,
+        "h": 88,
+        "pivot": {
+          "x": 0.5,
+          "y": 1
+        }
+      }
+    },
+    "animations": {
+      "idle": {
+        "frames": [
+          "front"
+        ],
+        "loop": true,
+        "directions": [
+          "front",
+          "front34",
+          "side",
+          "back34",
+          "back"
+        ]
+      },
+      "walk": {
+        "frames": [
+          "walk"
+        ],
+        "fps": 8,
+        "loop": true
+      },
+      "run": {
+        "frames": [
+          "run"
+        ],
+        "fps": 12,
+        "loop": true
+      },
+      "jump_start": {
+        "frames": [
+          "jump"
+        ],
+        "loop": false
+      },
+      "fall": {
+        "frames": [
+          "jump"
+        ],
+        "loop": true
+      },
+      "land": {
+        "frames": [
+          "land"
+        ],
+        "loop": false
+      },
+      "carry_idle": {
+        "frames": [
+          "carry"
+        ],
+        "loop": true
+      },
+      "carry_walk": {
+        "frames": [
+          "walk"
+        ],
+        "fps": 8,
+        "loop": true
+      },
+      "carry_run": {
+        "frames": [
+          "run"
+        ],
+        "fps": 12,
+        "loop": true
+      },
+      "handoff": {
+        "frames": [
+          "aim"
+        ],
+        "loop": false
+      },
+      "sit": {
+        "frames": [
+          "crouch"
+        ],
+        "loop": true
+      },
+      "celebrate": {
+        "frames": [
+          "celebrate"
+        ],
+        "loop": false
+      },
+      "emote_cheer": {
+        "frames": [
+          "celebrate"
+        ],
+        "loop": false
+      },
+      "emote_sad": {
+        "frames": [
+          "hurt"
+        ],
+        "loop": false
+      }
+    }
+  },
+  "fallback": {
+    "clips": {
+      "idle_look": "idle",
+      "glide": "fall",
+      "glide_in": "jump_start",
+      "glide_out": "land",
+      "emote_wave": "celebrate",
+      "emote_laugh": "celebrate",
+      "emote_think": "sit",
+      "emote_love": "celebrate",
+      "emote_dance": "celebrate",
+      "emote_sleep": "sit",
+      "emote_shrug": "idle",
+      "emote_thumbsup": "celebrate"
+    }
+  },
+  "notes": {
+    "source": "Sliced from the supplied concept sheet by tools/slice-character-sheet.mjs.",
+    "limitation": "Single-frame poses: the sheet provides one drawing per action, not animation cycles. Locomotion therefore does not cycle.",
+    "resolution": "Tallest gameplay sprite is 112px. The brief specifies 2048x2048 source; this is a downscaled contact sheet.",
+    "occupation": "AR Scout / Data Technician",
+    "age": "32",
+    "heightCm": "180"
+  }
+}

@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint (includes architecture boundary rules)
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      # The download budget is a product feature, not an aspiration: a
+      # regression here fails the build. See docs/07-asset-checklist.md §7.8.
+      - name: Enforce bundle budget
+        run: |
+          BYTES=$(find dist/assets -name '*.js' -exec gzip -c {} \; | wc -c)
+          BUDGET=$((6 * 1024 * 1024))
+          echo "gzipped JS: $BYTES bytes (budget $BUDGET)"
+          if [ "$BYTES" -gt "$BUDGET" ]; then
+            echo "::error::Boot bundle exceeds the 6 MB gzipped budget."
+            exit 1
+          fi

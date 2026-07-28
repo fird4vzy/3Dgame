@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+    <meta name="theme-color" content="#141724" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Lumenpost</title>
+    <style>
+      :root {
+        --dusk: #141724;
+        --lumen: #e8a33a;
+        --ink: #eae6dc;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: var(--dusk);
+        color: var(--ink);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        overscroll-behavior: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #game {
+        position: fixed;
+        inset: 0;
+        display: block;
+        /* A canvas is a replaced element: with `width: auto` it uses its
+           intrinsic drawing-buffer size even when all insets are 0, so it must
+           be stretched explicitly. Without this, dynamic resolution scaling (or
+           any DPR != 1) leaves the buffer drawn at its own size in the corner. */
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+      }
+      #ui {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 10;
+      }
+      /* Boot screen is inline so it paints before any JS or WebGL work. */
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-content: center;
+        justify-items: center;
+        gap: 18px;
+        background: var(--dusk);
+        transition: opacity 0.5s ease;
+      }
+      #boot.gone {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .lantern {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: var(--lumen);
+        box-shadow: 0 0 34px 10px rgba(232, 163, 58, 0.32);
+        animation: pulse 2.4s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(0.86);
+          opacity: 0.72;
+        }
+        50% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .lantern {
+          animation: none;
+        }
+      }
+      #boot h1 {
+        margin: 0;
+        font-family: "Palatino Linotype", Palatino, Georgia, serif;
+        font-weight: 400;
+        font-size: 30px;
+        letter-spacing: 0.05em;
+      }
+      #boot p {
+        margin: 0;
+        color: #a5aac0;
+        font-size: 13.5px;
+        letter-spacing: 0.02em;
+      }
+      #boot .bar {
+        width: 190px;
+        height: 2px;
+        background: #2b3048;
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      #boot .bar span {
+        display: block;
+        height: 100%;
+        width: 0%;
+        background: var(--lumen);
+        transition: width 0.25s ease;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="ui"></div>
+    <div id="boot">
+      <div class="lantern"></div>
+      <h1>Lumenpost</h1>
+      <div class="bar"><span id="boot-bar"></span></div>
+      <p id="boot-msg">Waking the planet&hellip;</p>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
