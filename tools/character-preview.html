@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Ren turnaround</title>
+    <style>
+      body { margin: 0; background: #10142a; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import * as THREE from 'three';
+      import { buildRen } from '/src/game/entities/RenCharacter.ts';
+
+      const W = 300, H = 620, VIEWS = 4;
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(W * VIEWS, H);
+      renderer.shadowMap.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color('#1a2038');
+
+      const key = new THREE.DirectionalLight(0xfff0dd, 2.4);
+      key.position.set(3, 6, 5);
+      scene.add(key);
+      scene.add(new THREE.DirectionalLight(0x92a8ff, 0.7).translateX(-4));
+      scene.add(new THREE.AmbientLight(0x8899cc, 0.75));
+
+      const rig = buildRen();
+      scene.add(rig.root);
+
+      const camera = new THREE.PerspectiveCamera(24, W / H, 0.1, 100);
+
+      // Front, 3/4, side, back — the sheet's own turnaround order.
+      const angles = [0, Math.PI * 0.25, Math.PI * 0.5, Math.PI];
+      renderer.setScissorTest(true);
+      angles.forEach((a, i) => {
+        camera.position.set(Math.sin(a) * 5.6, 1.0, Math.cos(a) * 5.6);
+        camera.lookAt(0, 0.98, 0);
+        renderer.setViewport(i * W, 0, W, H);
+        renderer.setScissor(i * W, 0, W, H);
+        renderer.render(scene, camera);
+      });
+
+      // A tight head crop, since the face is the thing under review.
+      window.__renHead = () => {
+        renderer.setScissorTest(false);
+        renderer.setSize(520, 520);
+        renderer.setViewport(0, 0, 520, 520);
+        camera.aspect = 1;
+        camera.fov = 18;
+        camera.updateProjectionMatrix();
+        camera.position.set(0.35, 1.78, 1.9);
+        camera.lookAt(0, 1.70, 0);
+        renderer.render(scene, camera);
+      };
+
+      window.__renReady = true;
+    </script>
+  </body>
+</html>

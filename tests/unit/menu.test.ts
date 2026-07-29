@@ -7,6 +7,8 @@ import { pickInDirection, type NavRect } from '../../src/ui/GamepadNavigator';
 import { AmbienceDirector } from '../../src/engine/audio/AmbienceDirector';
 import { t, setLocale, getLocale, registerLocale } from '../../src/engine/i18n/Localization';
 import { DISTRICTS, CONTRACTS } from '../../src/data/content';
+import { shouldBeVisible } from '../../src/core/math/spherical';
+import { PLANET_RADIUS } from '../../src/config/constants';
 
 const rect = (left: number, top: number, width = 100, height = 40): NavRect => ({
   left,
@@ -209,6 +211,45 @@ describe('run reset and restore', () => {
     // And the spatial hash was repopulated, so it can be picked up again.
     shards.update(0.016, new THREE.Vector3(0, 0, 0));
     expect(shards.collected).toBe(1);
+  });
+
+  it('keeps a collected shard hidden after the horizon culler runs', () => {
+    // The bug this pins: the culler wrote `visible` unconditionally for every
+    // cullable, so a shard collected on frame N came back on frame N — and
+    // because the shard update skips collected shards, it also stopped
+    // spinning. The pickup read as "the shard froze in place and stayed".
+    const shards = new ShardSystem(new EventBus());
+    const object = new THREE.Object3D();
+    object.position.set(0, PLANET_RADIUS + 1, 0);
+    shards.add('s1', object);
+
+    const viewer = new THREE.Vector3(0, PLANET_RADIUS + 1, 0);
+    shards.update(0.016, viewer);
+    expect(shards.collected).toBe(1);
+
+    // Standing right on top of it, so the horizon test alone says "visible".
+    expect(shouldBeVisible(object, viewer, PLANET_RADIUS)).toBe(false);
+
+    // And reset brings it back for a new run.
+    shards.reset();
+    expect(shouldBeVisible(object, viewer, PLANET_RADIUS)).toBe(true);
+  });
+
+  it('reports where a shard was picked up, so the burst spawns on it', () => {
+    const bus = new EventBus();
+    const shards = new ShardSystem(bus);
+    const object = new THREE.Object3D();
+    object.position.set(3, 4, 0);
+    shards.add('s1', object);
+
+    let seen: { x: number; y: number; z: number } | null = null;
+    bus.on('shard:collected', ({ position }) => {
+      seen = { x: position.x, y: position.y, z: position.z };
+    });
+    shards.update(0.016, new THREE.Vector3(3, 4, 0));
+
+    // The shard's own spot, not the player's — they differ once the bob moves it.
+    expect(seen).toEqual({ x: 3, y: 4, z: 0 });
   });
 
   it('maps lit districts onto stems, not onto their own ids', () => {

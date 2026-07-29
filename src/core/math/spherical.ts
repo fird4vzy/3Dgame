@@ -123,3 +123,24 @@ export function isBeyondHorizon(
   const cosCap = radius / viewerRadius;
   return dot(up, toPoint) < cosCap - slack;
 }
+
+/** The minimum an object needs for the culler to decide anything about it. */
+export interface Cullable {
+  position: V3;
+  userData: { hidden?: boolean };
+}
+
+/**
+ * Should a cullable be drawn this frame?
+ *
+ * Culling answers "is it round the curve of the planet", and **only** that.
+ * Anything flagged `userData.hidden` has been removed by gameplay — a collected
+ * shard — and stays gone regardless of where the camera is. Conflating the two
+ * meant the culler wrote `visible = true` over a just-collected shard on the
+ * same frame, leaving it sitting there frozen (it also stops animating once
+ * collected), so it looked like pickups did nothing at all.
+ */
+export function shouldBeVisible(object: Cullable, viewer: V3, radius: number): boolean {
+  if (object.userData.hidden === true) return false;
+  return !isBeyondHorizon(object.position, viewer, radius);
+}

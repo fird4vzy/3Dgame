@@ -8,7 +8,7 @@ import type { RendererService } from '@engine/render/RendererService';
 import type { MusicDirector } from '@engine/audio/MusicDirector';
 import type { IScene } from '@engine/scene/IScene';
 import type { LoadedCharacter } from '@engine/character/CharacterFactory';
-import { isBeyondHorizon } from '@core/math/spherical';
+import { shouldBeVisible } from '@core/math/spherical';
 import { PLANET_RADIUS } from '@config/constants';
 
 import { PlanetTerrain } from '@game/world/PlanetTerrain';
@@ -50,6 +50,8 @@ const LIT_TINT = new THREE.Color('#ffffff');
 const _emitUp = new THREE.Vector3();
 const _emitPos = new THREE.Vector3();
 const DUST_COLOUR = new THREE.Color('#b9ae94');
+/** Matches the shard mesh's emissive, so the burst reads as the shard itself. */
+const SHARD_COLOUR = new THREE.Color('#f6bd60');
 const _skyColour = new THREE.Color();
 const SKY_DUSK = new THREE.Color('#141724');
 const SKY_LIT = new THREE.Color('#413a5c');
@@ -552,6 +554,25 @@ export class PlanetScene implements IScene {
       });
     });
 
+    // A shard vanishing on its own is a state change with no moment attached.
+    // The burst is what makes the pickup land as an event.
+    this.bus.on('shard:collected', ({ position }) => {
+      _emitPos.set(position.x, position.y, position.z);
+      _emitUp.copy(_emitPos).normalize();
+      this.particles.emit({
+        position: _emitPos,
+        count: 18,
+        colour: SHARD_COLOUR,
+        speed: [1.2, 3.0],
+        life: [0.5, 1.1],
+        size: [0.06, 0.13],
+        direction: _emitUp,
+        spread: 1.0,
+        gravity: _emitUp.clone().multiplyScalar(-2.2),
+        drag: 1.4,
+      });
+    });
+
     this.bus.on('player:landed', ({ impactSpeed }) => {
       if (impactSpeed < 4) return;
       const position = this.player.object3D.position.clone();
@@ -877,7 +898,7 @@ export class PlanetScene implements IScene {
   private cullBelowHorizon(): void {
     const viewer = this.controller.smoothedPosition;
     for (const object of this.cullables) {
-      object.visible = !isBeyondHorizon(object.position, viewer, PLANET_RADIUS);
+      object.visible = shouldBeVisible(object, viewer, PLANET_RADIUS);
     }
   }
 }

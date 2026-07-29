@@ -21,26 +21,84 @@ import { createToonMaterial } from '@engine/render/ToonMaterial';
  */
 
 /**
- * Palette from the sheet's colour chart, lifted for gameplay.
+ * Swatches read straight off the concept sheet.
  *
- * The concept art is very dark — great on a white sheet, unreadable against a
- * dusk sky where the character becomes one flat silhouette. These are the same
- * hues raised in value, which keeps the design's identity while letting the
- * form read at distance. The relationships between the swatches are preserved;
- * only the overall level moved.
+ * Ren's identity is *near-black charcoal-green with teal accents*. An earlier
+ * pass raised every value for legibility and lost exactly that — he came out a
+ * mid sage grey and stopped looking like the drawing. These are the art values;
+ * the single knob below is the only place the game is allowed to deviate.
  */
-export const REN_PALETTE = {
-  skin: '#e8bd97',
-  hair: '#43332c',
-  jacket: '#5c6d64',
-  jacketDark: '#45514c',
-  accent: '#5fd6a8',
+const SHEET = {
+  skin: '#d9a882',
+  hair: '#241d19',
+  /** Sheet hair is two-tone: a near-black mass with warmer swept highlights. */
+  hairLift: '#3b2d25',
+  jacket: '#2b3430',
+  jacketDark: '#1d2422',
+  accent: '#3f9e73',
   glow: '#7dffc0',
-  shirt: '#33393a',
-  pants: '#525d5b',
-  boots: '#33393b',
-  metal: '#8d949a',
-  leather: '#7a6046',
+  shirt: '#151918',
+  pants: '#2a3230',
+  boots: '#161a19',
+  metal: '#6a7176',
+  leather: '#4c3b2b',
+} as const;
+
+/**
+ * How far to lift the sheet's values for gameplay, 0–1.
+ *
+ * The art is drawn on white paper; the game is a dusk planet, and at 0 the
+ * darkest swatches merge into the night sky at distance. This is the smallest
+ * lift that keeps a silhouette readable — turn it toward 0 for a look truer to
+ * the sheet, toward 1 for the old high-legibility palette. It is one number on
+ * purpose: it was previously baked into eleven hand-picked hex values, which
+ * made "why doesn't he look like the drawing" impossible to answer or undo.
+ */
+export const PALETTE_LIFT = 0.14;
+
+const LIFT_TOWARD = '#cfd8d2';
+
+/**
+ * Blend a swatch toward `LIFT_TOWARD` in plain sRGB bytes.
+ *
+ * Deliberately *not* `THREE.Color.lerp`: three converts hex to linear working
+ * space on construction, and a linear-space blend toward a light colour raises
+ * dark swatches far more than the number suggests — 0.14 there lands lighter
+ * than the palette this is replacing. Byte-space matches what the eye and the
+ * art tool both do.
+ */
+function lift(hex: string, amount = PALETTE_LIFT): string {
+  const from = parseInt(hex.slice(1), 16);
+  const to = parseInt(LIFT_TOWARD.slice(1), 16);
+  let out = '';
+  for (let shift = 16; shift >= 0; shift -= 8) {
+    const a = (from >> shift) & 0xff;
+    const b = (to >> shift) & 0xff;
+    out += Math.round(a + (b - a) * amount)
+      .toString(16)
+      .padStart(2, '0');
+  }
+  return `#${out}`;
+}
+
+/** The sheet's palette at the gameplay lift. */
+export const REN_PALETTE = {
+  skin: lift(SHEET.skin),
+  hair: lift(SHEET.hair),
+  hairLift: lift(SHEET.hairLift),
+  jacket: lift(SHEET.jacket),
+  jacketDark: lift(SHEET.jacketDark),
+  // The accents are the design's one bright note; lifting them just washes
+  // them out, so they stay as drawn.
+  accent: SHEET.accent,
+  glow: SHEET.glow,
+  shirt: lift(SHEET.shirt),
+  pants: lift(SHEET.pants),
+  boots: lift(SHEET.boots),
+  metal: lift(SHEET.metal),
+  leather: lift(SHEET.leather),
+  /** Eyes and mouth — darker than the hair so the face still reads at 2 m. */
+  ink: '#171312',
 } as const;
 
 export interface RenRig {
@@ -83,7 +141,9 @@ const P = {
   torsoLen: 0.52,
   neckY: 0.52,
   headR: 0.113,
-  shoulderX: 0.19,
+  // The sheet's figure is lean. Wide shoulders on a short torso were reading
+  // as heavy-set, which is not this character.
+  shoulderX: 0.175,
   upperArm: 0.31,
   foreArm: 0.29,
   hipX: 0.095,
@@ -95,11 +155,31 @@ const P = {
   hipY: HIP_DROP + 0.40 + 0.38 + FOOT_DROP,
 };
 
+/** Head origin in torso space. */
+const HEAD_Y = P.neckY + 0.10;
+
+/**
+ * Lowest point of the jaw, in head space.
+ *
+ * Kept as a named constant because the collar is positioned *from* it. Sizing
+ * the collar independently is how the first pass ended up hiding the jaw, mouth
+ * and nose behind a grey box — the face was there, just buried.
+ */
+const CHIN_Y = -0.134;
+
+/** Top of the standing collar: clears the chin with a visible gap. */
+const COLLAR_TOP_Y = HEAD_Y + CHIN_Y - 0.022;
+
 function mesh(
   geometry: THREE.BufferGeometry,
   colour: string,
   collect: THREE.Mesh[],
-  options: { emissive?: string; emissiveIntensity?: number } = {},
+  options: {
+    emissive?: string;
+    emissiveIntensity?: number;
+    transparent?: boolean;
+    opacity?: number;
+  } = {},
 ): THREE.Mesh {
   const material = createToonMaterial({
     color: colour,
@@ -108,6 +188,8 @@ function mesh(
     ...(options.emissiveIntensity !== undefined
       ? { emissiveIntensity: options.emissiveIntensity }
       : {}),
+    ...(options.transparent !== undefined ? { transparent: options.transparent } : {}),
+    ...(options.opacity !== undefined ? { opacity: options.opacity } : {}),
   });
   const m = new THREE.Mesh(geometry, material);
   m.castShadow = true;
@@ -154,22 +236,61 @@ export function buildRen(): RenRig {
 
   // The jacket is a second, slightly larger shell — that layered silhouette is
   // the most recognisable thing about the design.
-  const jacket = mesh(new THREE.BoxGeometry(0.43, P.torsoLen * 0.82, 0.29), REN_PALETTE.jacket, meshes);
+  const jacket = mesh(new THREE.BoxGeometry(0.41, P.torsoLen * 0.82, 0.28), REN_PALETTE.jacket, meshes);
   jacket.position.y = P.torsoLen / 2 - 0.06;
   torso.add(jacket);
 
-  const collar = mesh(new THREE.BoxGeometry(0.30, 0.10, 0.26), REN_PALETTE.jacketDark, meshes);
-  collar.position.y = P.torsoLen - 0.04;
+  // Quilting. On the sheet the jacket is a padded puffer read almost entirely
+  // through its horizontal seam lines — without them the shell is just a box,
+  // and the box is what made him look like a mech instead of a courier.
+  for (const y of [0.10, 0.22, 0.34]) {
+    const quilt = mesh(new THREE.BoxGeometry(0.415, 0.030, 0.02), REN_PALETTE.jacketDark, meshes);
+    quilt.position.set(0, y, 0.135);
+    torso.add(quilt);
+    const back = mesh(new THREE.BoxGeometry(0.415, 0.030, 0.02), REN_PALETTE.jacketDark, meshes);
+    back.position.set(0, y, -0.135);
+    torso.add(back);
+  }
+
+  // Open front: two lapels over the black tee, rather than a sealed slab.
+  for (const side of [-1, 1]) {
+    const lapel = mesh(
+      new THREE.BoxGeometry(0.135, P.torsoLen * 0.78, 0.045),
+      REN_PALETTE.jacket,
+      meshes,
+    );
+    lapel.position.set(side * 0.135, P.torsoLen / 2 - 0.05, 0.125);
+    lapel.rotation.z = side * 0.06;
+    torso.add(lapel);
+  }
+
+  // Standing collar. Its top edge is the constraint that matters: pushed up to
+  // where a "tall" collar wants to be, it swallowed the jaw, mouth and nose and
+  // the face vanished into a grey box. It stops below the chin, deliberately.
+  const collar = mesh(new THREE.BoxGeometry(0.27, 0.10, 0.245), REN_PALETTE.jacketDark, meshes);
+  collar.position.y = COLLAR_TOP_Y - 0.05;
   torso.add(collar);
+
+  // Green piping over the shoulders — the design's only saturated note, so it
+  // does a lot of the identifying. It has to lie *on* the jacket shell; at any
+  // z inside it, it is simply buried and never renders.
+  for (const side of [-1, 1]) {
+    const piping = mesh(new THREE.BoxGeometry(0.115, 0.014, 0.215), REN_PALETTE.accent, meshes, {
+      emissive: REN_PALETTE.accent,
+      emissiveIntensity: 0.3,
+    });
+    piping.position.set(side * 0.14, P.torsoLen / 2 - 0.06 + (P.torsoLen * 0.82) / 2, 0);
+    torso.add(piping);
+  }
 
   // Circuit accent down the chest.
   const accent = mesh(
-    new THREE.BoxGeometry(0.045, P.torsoLen * 0.5, 0.01),
+    new THREE.BoxGeometry(0.028, P.torsoLen * 0.44, 0.012),
     REN_PALETTE.accent,
     meshes,
     { emissive: REN_PALETTE.accent, emissiveIntensity: 0.55 },
   );
-  accent.position.set(0.10, P.torsoLen * 0.48, 0.152);
+  accent.position.set(0.058, P.torsoLen * 0.46, 0.152);
   torso.add(accent);
 
   // Satchel across the back — the courier read, and the glide wing's home.
@@ -182,81 +303,158 @@ export function buildRen(): RenRig {
   satchel.add(satchelFlap);
   torso.add(satchel);
 
-  const strap = mesh(new THREE.BoxGeometry(0.07, 0.44, 0.02), REN_PALETTE.leather, meshes);
-  strap.position.set(-0.06, P.torsoLen * 0.5, 0.145);
-  strap.rotation.z = 0.32;
+  // Satchel strap across the chest. Kept short and tight to the shell — run
+  // long it swings out past the silhouette and reads as a plank, not a strap.
+  const strap = mesh(new THREE.BoxGeometry(0.048, 0.34, 0.018), REN_PALETTE.leather, meshes);
+  strap.position.set(-0.035, P.torsoLen * 0.52, 0.146);
+  strap.rotation.z = 0.42;
   torso.add(strap);
 
   // ── head ────────────────────────────────────────────────────────────────
   const head = new THREE.Group();
   head.name = 'ren_head';
-  head.position.y = P.neckY + 0.06;
+  head.position.y = HEAD_Y;
   torso.add(head);
 
   const neck = mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.08, 8), REN_PALETTE.skin, meshes);
   neck.position.y = -0.07;
   head.add(neck);
 
-  const skull = mesh(new THREE.SphereGeometry(P.headR, 14, 12), REN_PALETTE.skin, meshes);
+  const skull = mesh(new THREE.SphereGeometry(P.headR, 16, 14), REN_PALETTE.skin, meshes);
   skull.scale.set(1, 1.12, 1.02);
   head.add(skull);
 
-  // Hair as an offset cluster — reads as the sheet's swept, messy shape without
-  // needing alpha cards.
-  const hairMain = mesh(new THREE.SphereGeometry(P.headR * 1.06, 12, 10), REN_PALETTE.hair, meshes);
-  hairMain.scale.set(1.04, 0.92, 1.04);
-  hairMain.position.set(0, 0.035, -0.008);
+  // A jaw mass below the cranium. The sheet's Ren has a defined chin; a single
+  // sphere gives a doll head, which is most of what made him read as a helmet.
+  const jaw = mesh(new THREE.SphereGeometry(P.headR * 0.74, 12, 10), REN_PALETTE.skin, meshes);
+  jaw.scale.set(0.94, 0.86, 1.0);
+  jaw.position.set(0, -0.062, 0.016);
+  head.add(jaw);
+
+  for (const side of [-1, 1]) {
+    const ear = mesh(new THREE.SphereGeometry(0.024, 8, 6), REN_PALETTE.skin, meshes);
+    ear.scale.set(0.5, 1.15, 0.85);
+    ear.position.set(side * (P.headR * 0.99), -0.004, -0.004);
+    head.add(ear);
+  }
+
+  // ── face ────────────────────────────────────────────────────────────────
+  // Eyes sit *behind* the lenses rather than being replaced by them: on the
+  // sheet you can see through the green tint, and that is the difference
+  // between a person in glasses and a visor with two lamps in it.
+  const FACE_Z = P.headR * 0.9;
+  for (const side of [-1, 1]) {
+    const eye = mesh(new THREE.SphereGeometry(0.0135, 8, 6), REN_PALETTE.ink, meshes);
+    eye.scale.set(1.25, 1, 0.6);
+    eye.position.set(side * 0.043, 0.011, FACE_Z * 0.99);
+    head.add(eye);
+
+    const brow = mesh(new THREE.BoxGeometry(0.040, 0.009, 0.014), REN_PALETTE.hair, meshes);
+    brow.position.set(side * 0.045, 0.043, FACE_Z * 0.97);
+    // Angled down toward the nose — the sheet's expression is wry, not blank.
+    brow.rotation.z = side * -0.16;
+    head.add(brow);
+  }
+
+  const nose = mesh(new THREE.BoxGeometry(0.020, 0.030, 0.024), REN_PALETTE.skin, meshes);
+  nose.position.set(0, -0.020, FACE_Z * 1.02);
+  head.add(nose);
+
+  const mouth = mesh(new THREE.BoxGeometry(0.030, 0.007, 0.012), REN_PALETTE.ink, meshes);
+  mouth.position.set(0, -0.052, FACE_Z * 0.95);
+  head.add(mouth);
+
+  // ── glasses ─────────────────────────────────────────────────────────────
+  // Round frames with a real rim, a tinted lens and temple arms reaching the
+  // ears. Pushed too bright the two lenses bleed together and read as one solid
+  // visor bar, which is a different character entirely — so the emissive stays
+  // low, the lens is translucent, and a dark rim holds the two shapes apart.
+  const LENS_X = 0.047;
+  const LENS_R = 0.034;
+  const lenses: THREE.Mesh[] = [];
+
+  for (const side of [-1, 1]) {
+    const rim = mesh(new THREE.TorusGeometry(LENS_R, 0.0075, 6, 16), REN_PALETTE.ink, meshes);
+    rim.position.set(side * LENS_X, 0.012, FACE_Z + 0.014);
+    head.add(rim);
+
+    const lens = mesh(
+      new THREE.CylinderGeometry(LENS_R * 0.94, LENS_R * 0.94, 0.005, 14),
+      REN_PALETTE.accent,
+      meshes,
+      { emissive: REN_PALETTE.glow, emissiveIntensity: 0.4, transparent: true, opacity: 0.55 },
+    );
+    lens.rotation.x = Math.PI / 2;
+    lens.position.set(side * LENS_X, 0.012, FACE_Z + 0.013);
+    // The tint sits over the eye, so it must not also occlude it in the depth
+    // buffer from a grazing angle.
+    lens.castShadow = false;
+    head.add(lens);
+    lenses.push(lens);
+
+    // Temple arm, angled back to the ear.
+    const temple = mesh(new THREE.BoxGeometry(0.008, 0.008, 0.085), REN_PALETTE.ink, meshes);
+    temple.position.set(side * (LENS_X + LENS_R * 0.82), 0.014, FACE_Z - 0.045);
+    temple.rotation.y = side * 0.28;
+    head.add(temple);
+  }
+
+  const bridge = mesh(new THREE.BoxGeometry(0.028, 0.007, 0.008), REN_PALETTE.ink, meshes);
+  bridge.position.set(0, 0.014, FACE_Z + 0.013);
+  head.add(bridge);
+
+  // ── hair ────────────────────────────────────────────────────────────────
+  // The sheet's hair is a big, messy, swept mass with real volume above the
+  // skull — it is the loudest thing in his silhouette, and a tight cap loses
+  // him. Built as a two-tone cluster: a near-black base with warmer highlight
+  // lumps on top, which is what stops it reading as one flat blob.
+  const hairMain = mesh(new THREE.SphereGeometry(P.headR * 1.14, 14, 12), REN_PALETTE.hair, meshes);
+  hairMain.scale.set(1.06, 1.0, 1.06);
+  hairMain.position.set(0, 0.048, -0.014);
   head.add(hairMain);
 
-  // Tufts are weighted up and to one side so the shape reads as *swept* rather
-  // than as a symmetric cap — that asymmetry is most of what makes the sheet's
-  // hair recognisable at low poly.
-  for (const [x, y, z, r, sy] of [
-    [-0.085, 0.075, 0.020, 0.58, 1.0],
-    [0.055, 0.100, 0.010, 0.62, 1.1],
-    [0.000, 0.112, -0.055, 0.64, 0.9],
-    [-0.040, 0.132, 0.045, 0.50, 1.2],
-    [0.075, 0.070, -0.045, 0.52, 1.0],
-    [-0.020, 0.150, -0.010, 0.42, 1.3],
+  // Weighted up and to one side so the shape reads as *swept*, not symmetric —
+  // that asymmetry is most of what makes the sheet's hair recognisable at low
+  // poly. `lift` marks the lumps that catch the highlight tone.
+  for (const [x, y, z, r, sy, highlight] of [
+    [-0.092, 0.086, 0.024, 0.62, 1.05, 0],
+    [0.062, 0.112, 0.014, 0.66, 1.15, 1],
+    [0.000, 0.126, -0.062, 0.70, 0.95, 0],
+    [-0.046, 0.152, 0.050, 0.56, 1.25, 1],
+    [0.084, 0.080, -0.052, 0.58, 1.05, 0],
+    [-0.024, 0.172, -0.014, 0.50, 1.35, 1],
+    [0.038, 0.158, 0.052, 0.46, 1.2, 1],
+    [-0.078, 0.118, -0.044, 0.52, 1.1, 0],
+    [0.096, 0.126, 0.018, 0.44, 1.15, 0],
+    [-0.010, 0.096, 0.086, 0.48, 0.9, 0],
   ] as const) {
-    const tuft = mesh(new THREE.SphereGeometry(P.headR * r, 8, 6), REN_PALETTE.hair, meshes);
+    const tuft = mesh(
+      new THREE.SphereGeometry(P.headR * r, 8, 6),
+      highlight ? REN_PALETTE.hairLift : REN_PALETTE.hair,
+      meshes,
+    );
     tuft.position.set(x, y, z);
     tuft.scale.set(1, sy, 1);
     head.add(tuft);
   }
 
-  // A fringe over the brow, which is what stops the face reading as a bare ball.
-  const fringe = mesh(new THREE.BoxGeometry(0.19, 0.045, 0.055), REN_PALETTE.hair, meshes);
-  fringe.position.set(-0.012, 0.072, P.headR * 0.78);
-  fringe.rotation.z = -0.16;
-  head.add(fringe);
-
-  // Glasses: Ren's signature, and the easiest thing to get wrong. Pushed too
-  // bright the two lenses bleed into one another and read as a solid visor
-  // bar, which is a different character entirely. Keep the emissive modest,
-  // hold a real gap between them, and let a dark frame separate the shapes.
-  const lenses: THREE.Mesh[] = [];
-  for (const side of [-1, 1]) {
-    const rim = mesh(new THREE.BoxGeometry(0.058, 0.040, 0.010), REN_PALETTE.hair, meshes);
-    rim.position.set(side * 0.052, 0.012, P.headR * 0.92);
-    head.add(rim);
-
-    const lens = mesh(new THREE.BoxGeometry(0.046, 0.028, 0.011), REN_PALETTE.glow, meshes, {
-      emissive: REN_PALETTE.glow,
-      emissiveIntensity: 0.85,
-    });
-    lens.position.set(side * 0.052, 0.012, P.headR * 0.95);
-    head.add(lens);
-    lenses.push(lens);
+  // Fringe: two angled slabs falling over the brow rather than one bar, so it
+  // reads as parted hair instead of a helmet lip.
+  for (const [x, rot, w] of [
+    [-0.048, -0.34, 0.11],
+    [0.042, 0.22, 0.13],
+  ] as const) {
+    const fringe = mesh(new THREE.BoxGeometry(w, 0.050, 0.050), REN_PALETTE.hair, meshes);
+    fringe.position.set(x, 0.078, FACE_Z * 0.80);
+    fringe.rotation.z = rot;
+    head.add(fringe);
   }
-  const bridge = mesh(new THREE.BoxGeometry(0.022, 0.007, 0.009), REN_PALETTE.hair, meshes);
-  bridge.position.set(0, 0.012, P.headR * 0.94);
-  head.add(bridge);
 
-  // Brow line, so the face has structure above the lenses.
-  const brow = mesh(new THREE.BoxGeometry(0.14, 0.016, 0.02), REN_PALETTE.hair, meshes);
-  brow.position.set(0, 0.042, P.headR * 0.88);
-  head.add(brow);
+  for (const side of [-1, 1]) {
+    const sideburn = mesh(new THREE.BoxGeometry(0.018, 0.052, 0.040), REN_PALETTE.hair, meshes);
+    sideburn.position.set(side * (P.headR * 0.93), 0.018, 0.014);
+    head.add(sideburn);
+  }
 
   // ── arms ────────────────────────────────────────────────────────────────
   const makeArm = (side: number) => {
@@ -367,12 +565,15 @@ export function buildRen(): RenRig {
     const soleH = 0.04;
     const bootH = P.footDrop - soleH;
 
-    const boot = mesh(new THREE.BoxGeometry(0.135, bootH, P.footLen), REN_PALETTE.boots, meshes);
-    boot.position.set(0, -P.shin - bootH / 2, 0.035);
+    const boot = mesh(new THREE.BoxGeometry(0.125, bootH, P.footLen), REN_PALETTE.boots, meshes);
+    boot.position.set(0, -P.shin - bootH / 2, 0.03);
     shin.add(boot);
 
-    const sole = mesh(new THREE.BoxGeometry(0.145, soleH, P.footLen + 0.01), REN_PALETTE.metal, meshes);
-    sole.position.set(0, -P.shin - bootH - soleH / 2, 0.04);
+    // The sole was `metal` — a light grey that read as a white-soled trainer and
+    // dragged the eye straight to his feet. On the sheet the boot is one dark
+    // mass with the sole only just separable from it.
+    const sole = mesh(new THREE.BoxGeometry(0.132, soleH, P.footLen), REN_PALETTE.jacketDark, meshes);
+    sole.position.set(0, -P.shin - bootH - soleH / 2, 0.03);
     shin.add(sole);
 
     return { thigh, shin };

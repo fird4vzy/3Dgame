@@ -10,3 +10,7 @@ test-results/
 
 # Delivery artefacts, not source
 *.bundle
+
+# Character turnarounds from tools/shoot-character.mjs
+*-turnaround.png
+*-head.png

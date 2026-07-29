@@ -15,7 +15,8 @@
     "format": "prettier --write \"src/**/*.{ts,glsl,css}\" \"tests/**/*.ts\"",
     "test:e2e": "node tests/e2e/smoke.mjs",
     "test:all": "npm run typecheck && npm run lint && npm run test && npm run build",
-    "test:play": "node tests/e2e/playthrough.mjs"
+    "test:play": "node tests/e2e/playthrough.mjs",
+    "shoot:character": "node tools/shoot-character.mjs"
   },
   "dependencies": {
     "lit": "^3.3.3",

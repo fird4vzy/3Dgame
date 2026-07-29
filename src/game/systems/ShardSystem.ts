@@ -12,6 +12,18 @@ interface Shard {
 const COLLECT_RADIUS = 1.4;
 
 /**
+ * Hide or show a shard's mesh.
+ *
+ * `userData.hidden` is the authoritative flag, not `visible` — the scene's
+ * horizon culler rewrites `visible` every frame and would otherwise bring a
+ * collected shard straight back.
+ */
+function setHidden(object: THREE.Object3D, hidden: boolean): void {
+  object.userData.hidden = hidden;
+  object.visible = !hidden;
+}
+
+/**
  * Lumen Shards — optional collectibles.
  *
  * They auto-collect on proximity rather than needing a button press: an
@@ -52,7 +64,7 @@ export class ShardSystem {
     for (const shard of this.shards.values()) {
       if (!shard.collected) continue;
       shard.collected = false;
-      shard.object.visible = true;
+      setHidden(shard.object, false);
       this.hash.insert(shard);
     }
     this.collectedCount = 0;
@@ -63,7 +75,7 @@ export class ShardSystem {
       const shard = this.shards.get(id);
       if (!shard || shard.collected) continue;
       shard.collected = true;
-      shard.object.visible = false;
+      setHidden(shard.object, true);
       this.hash.remove(shard);
       this.collectedCount++;
     }
@@ -90,7 +102,7 @@ export class ShardSystem {
     for (const shard of nearby) {
       if (shard.collected) continue;
       shard.collected = true;
-      shard.object.visible = false;
+      setHidden(shard.object, true);
       this.hash.remove(shard);
       this.collectedCount++;
 
@@ -98,6 +110,9 @@ export class ShardSystem {
         id: shard.id,
         total: this.collectedCount,
         of: this.shards.size,
+        // The shard's own spot, not the player's — the burst should read as
+        // the shard coming apart, not as something happening to the courier.
+        position: { x: shard.position.x, y: shard.position.y, z: shard.position.z },
       });
     }
   }

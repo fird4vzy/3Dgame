@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
-import { buildRen, REN_HEIGHT, REN_PALETTE } from '../../src/game/entities/RenCharacter';
+import {
+  buildRen,
+  REN_HEIGHT,
+  REN_PALETTE,
+  PALETTE_LIFT,
+} from '../../src/game/entities/RenCharacter';
 import { RenAnimator } from '../../src/game/entities/RenAnimator';
 
 describe('Ren rig', () => {
@@ -51,19 +56,41 @@ describe('Ren rig', () => {
     expect(rig.handSocket.parent).toBe(rig.forearmR);
   });
 
-  it('casts shadows from its meshes', () => {
+  it('casts shadows from every solid mesh', () => {
     const rig = buildRen();
     expect(rig.meshes.length).toBeGreaterThan(10);
-    expect(rig.meshes.every((m) => m.castShadow)).toBe(true);
+
+    // The tinted lenses are the one exception, and deliberately so: the shadow
+    // map is opaque, so a translucent lens that casts would stamp a hard black
+    // disc across the eye it is supposed to show through.
+    const solid = rig.meshes.filter((m) => !rig.lenses.includes(m));
+    expect(solid.every((m) => m.castShadow)).toBe(true);
+    expect(rig.lenses.every((m) => m.castShadow)).toBe(false);
   });
 
   it('keeps the two lenses separated so they do not read as a visor', () => {
     const rig = buildRen();
     expect(rig.lenses).toHaveLength(2);
     const gap = Math.abs(rig.lenses[0]!.position.x - rig.lenses[1]!.position.x);
-    const width = (rig.lenses[0]!.geometry as THREE.BoxGeometry).parameters.width;
-    // Centres must be further apart than a lens is wide, or they touch.
+
+    // Measured, not read off geometry parameters: the lens has been a box and
+    // is now a disc, and the rule ("centres further apart than a lens is wide")
+    // is about the shape on screen, not about which primitive draws it.
+    rig.lenses[0]!.geometry.computeBoundingBox();
+    const box = rig.lenses[0]!.geometry.boundingBox!;
+    const width = (box.max.x - box.min.x) * rig.lenses[0]!.scale.x;
     expect(gap).toBeGreaterThan(width);
+  });
+
+  it('leaves the eyes visible through the lenses', () => {
+    const rig = buildRen();
+    // The sheet's glasses are tinted, not opaque. An opaque lens turns him into
+    // a visor with two lamps in it, which is a different character.
+    for (const lens of rig.lenses) {
+      const material = lens.material as THREE.MeshToonMaterial;
+      expect(material.transparent).toBe(true);
+      expect(material.opacity).toBeLessThan(0.8);
+    }
   });
 
   it('gives him arms long enough to reach mid-thigh', () => {
@@ -83,14 +110,43 @@ describe('Ren rig', () => {
     expect(hand.y).toBeLessThan(knee.y + 0.45);
   });
 
-  it('uses a palette light enough to read against a dusk sky', () => {
-    // The concept art is very dark; these are the lifted gameplay values.
-    // Measured in sRGB — three converts to linear working space on construction,
-    // so the default getHSL reports a much lower number for the same swatch.
-    const jacket = new THREE.Color(REN_PALETTE.jacket);
+  it('stays dark like the concept sheet without going to pure black', () => {
+    // Two failure modes bracket this. Lift the palette too far and he stops
+    // looking like the drawing — the previous pass did exactly that and came
+    // out a mid sage grey. Lift it not at all and he merges into the dusk sky
+    // at distance. Measured in sRGB: three converts to linear working space on
+    // construction, so the default getHSL reports a much lower number.
     const hsl = { h: 0, s: 0, l: 0 };
-    jacket.getHSL(hsl, THREE.SRGBColorSpace);
-    expect(hsl.l).toBeGreaterThan(0.3);
+    new THREE.Color(REN_PALETTE.jacket).getHSL(hsl, THREE.SRGBColorSpace);
+    expect(hsl.l).toBeGreaterThan(0.12);
+    expect(hsl.l).toBeLessThan(0.32);
+  });
+
+  it('lifts every swatch by the same amount, so hue relationships survive', () => {
+    // PALETTE_LIFT is the one dial between the art and the game. If a swatch is
+    // ever hand-tweaked away from it, the sheet's colour relationships drift and
+    // "make him match the picture" stops having a single answer.
+    expect(PALETTE_LIFT).toBeGreaterThan(0);
+    expect(PALETTE_LIFT).toBeLessThan(0.4);
+
+    const l = (hex: string) => {
+      const hsl = { h: 0, s: 0, l: 0 };
+      new THREE.Color(hex).getHSL(hsl, THREE.SRGBColorSpace);
+      return hsl.l;
+    };
+    // Ordering from the sheet: boots darkest, then shirt, jacket, skin.
+    expect(l(REN_PALETTE.boots)).toBeLessThan(l(REN_PALETTE.jacket));
+    expect(l(REN_PALETTE.jacket)).toBeLessThan(l(REN_PALETTE.skin));
+    expect(l(REN_PALETTE.hair)).toBeLessThan(l(REN_PALETTE.hairLift));
+  });
+
+  it('gives him a face, not just a pair of glowing lenses', () => {
+    const rig = buildRen();
+    // Regression guard for the thing that made him read as a helmet: the head
+    // had no eyes, nose or mouth at all. Count the head's own meshes — a bare
+    // skull plus hair was 11; a face pushes it well past that.
+    const headMeshes = rig.head.children.filter((c) => (c as THREE.Mesh).isMesh);
+    expect(headMeshes.length).toBeGreaterThan(24);
   });
 });
 

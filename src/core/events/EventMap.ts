@@ -84,7 +84,8 @@ export interface EventMap {
   'district:igniting': { district: string };
   'district:lit': { district: string; litCount: number };
   'district:entered': { district: string; displayName: string };
-  'shard:collected': { id: string; total: number; of: number };
+  /** `position` is where it was picked up, so the scene can burst motes there. */
+  'shard:collected': { id: string; total: number; of: number; position: Vec3Like };
   'music:stemEnabled': { stem: string };
 
   // ── interaction & dialogue ──────────────────────────────────────────────
