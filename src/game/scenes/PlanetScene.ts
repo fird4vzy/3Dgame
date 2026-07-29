@@ -104,6 +104,8 @@ export class PlanetScene implements IScene {
   private parcelVisual: { group: THREE.Group; glow: THREE.PointLight; core: THREE.Mesh } | null =
     null;
   private carriedWeight: ParcelWeight = 'light';
+  /** Whatever the parcel was parented to — a hand socket, or the body. */
+  private parcelParent: THREE.Object3D | null = null;
   private currentDistrict: DistrictId | null = null;
   private bobTimer = 0;
 
@@ -519,14 +521,29 @@ export class PlanetScene implements IScene {
     this.carriedWeight = weight;
 
     const parcel = createParcel(colour);
-    parcel.group.position.set(0.34, 1.0, 0.16);
-    this.player.object3D.add(parcel.group);
+
+    // Parent to the character's hand if it has one, so the lumen travels with
+    // the arm as it swings instead of floating alongside the body. Characters
+    // without a skeleton (a sprite) return null, and it falls back to a fixed
+    // offset — which is exactly what the socket contract is for.
+    const hand = this.character?.getSocket('hand_R') ?? null;
+    if (hand) {
+      parcel.group.position.set(0, 0, 0);
+      hand.add(parcel.group);
+      this.parcelParent = hand;
+    } else {
+      parcel.group.position.set(0.34, 1.0, 0.16);
+      this.player.object3D.add(parcel.group);
+      this.parcelParent = this.player.object3D;
+    }
+
     this.parcelVisual = parcel;
   }
 
   private detachParcel(): void {
     if (!this.parcelVisual) return;
-    this.player.object3D.remove(this.parcelVisual.group);
+    (this.parcelParent ?? this.player.object3D).remove(this.parcelVisual.group);
+    this.parcelParent = null;
     this.parcelVisual.group.traverse((object) => {
       const mesh = object as THREE.Mesh;
       mesh.geometry?.dispose?.();
@@ -545,7 +562,12 @@ export class PlanetScene implements IScene {
     const active = this.quests.active;
     const warmth = active ? this.warmth.warmthOf(active.def.id) : 1;
 
-    this.parcelVisual.group.position.y = 1.0 + Math.sin(this.bobTimer * 1.6 * Math.PI * 2) * 0.02;
+    // When held in a socket the arm supplies the motion, so the parcel only
+    // needs its own slow spin and a hint of float.
+    const inHand = this.parcelParent !== null && this.parcelParent !== this.player.object3D;
+    this.parcelVisual.group.position.y = inHand
+      ? Math.sin(this.bobTimer * 1.6 * Math.PI * 2) * 0.012
+      : 1.0 + Math.sin(this.bobTimer * 1.6 * Math.PI * 2) * 0.02;
     this.parcelVisual.group.rotation.y += dt * 0.8;
 
     const colour = new THREE.Color('#69a5d8').lerp(new THREE.Color('#f6bd60'), warmth);

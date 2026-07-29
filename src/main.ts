@@ -9,8 +9,6 @@ import { AssetManager } from '@engine/assets/AssetManager';
 import { SoundBoard } from '@game/audio/SoundBoard';
 import { SaveManager } from '@engine/save/SaveManager';
 import { SettingsManager } from '@engine/settings/SettingsManager';
-import { loadCharacter } from '@engine/character/CharacterFactory';
-import type { CharacterDefinition } from '@engine/character/CharacterDefinition';
 import { UIManager } from '@ui/UIManager';
 import { PauseScreen } from '@ui/screens/PauseScreen';
 import { PlanetScene } from '@game/scenes/PlanetScene';
@@ -232,10 +230,13 @@ function applyAudioSettings(audio: AudioManager, settings: SettingsManager): voi
  */
 async function attachCharacter(scene: PlanetScene): Promise<void> {
   try {
-    const definition = (await import('./data/characters/ren_cypher.character.json'))
-      .default as unknown as CharacterDefinition;
-    const character = await loadCharacter(definition, import.meta.env.BASE_URL);
-    scene.setCharacter(character);
+    // Ren is a real 3D rig, procedurally assembled from the concept sheet's
+    // specification. A billboard was never right for a game whose camera orbits
+    // a sphere — the character has to have a back, cast a shadow, and turn —
+    // and a procedural rig also gives locomotion that actually cycles, which no
+    // amount of sprite work could have done with one drawing per action.
+    const { RenAnimator } = await import('@game/entities/RenAnimator');
+    scene.setCharacter(new RenAnimator());
   } catch (error) {
     console.warn('[Character] falling back to the placeholder rig', error);
   }
