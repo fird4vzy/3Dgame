@@ -33,6 +33,17 @@ export interface ControllerDeps {
   bus: EventBus;
   /** Supplies the camera's forward vector so movement is camera-relative. */
   camera: THREE.Object3D;
+  /**
+   * Preferred source of the movement heading.
+   *
+   * The camera's own forward vector is a poor reference: when occlusion pulls
+   * the arm in tight against a prop the camera ends up close to and below its
+   * target, so its direction is nearly parallel to `up` and projecting it onto
+   * the tangent plane collapses to noise — movement then jitters or wanders.
+   * The follow rig already maintains a stable, parallel-transported heading
+   * that is tangent by construction, so use it when one is available.
+   */
+  heading?: (out: THREE.Vector3) => THREE.Vector3;
 }
 
 /**
@@ -94,7 +105,8 @@ export class SphericalCharacterController extends Component {
     //    tangent plane is what makes "W" mean "away from the camera" no matter
     //    where on the sphere the player is standing. The sign convention lives
     //    in computeMovementBasis, where it is unit-tested.
-    this.deps.camera.getWorldDirection(_camForward);
+    if (this.deps.heading) this.deps.heading(_camForward);
+    else this.deps.camera.getWorldDirection(_camForward);
     const basis = computeMovementBasis(_camForward, _up, _forward, _right);
 
     // 3. Desired velocity in the tangent plane.

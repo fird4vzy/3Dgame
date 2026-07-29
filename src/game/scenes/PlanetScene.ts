@@ -95,6 +95,7 @@ export class PlanetScene implements IScene {
   private readonly cullables: THREE.Object3D[] = [];
   private readonly npcObjects = new Map<string, THREE.Object3D>();
   private readonly thermals: THREE.Vector3[] = [];
+  private readonly cameraOccluders: THREE.Object3D[] = [];
   private sun!: THREE.DirectionalLight;
   private ambient!: THREE.HemisphereLight;
   private lighthouse: { lamp: THREE.Mesh; light: THREE.PointLight } | null = null;
@@ -108,6 +109,7 @@ export class PlanetScene implements IScene {
   private parcelParent: THREE.Object3D | null = null;
   private currentDistrict: DistrictId | null = null;
   private bobTimer = 0;
+  private lastDelta = 1 / 60;
 
   constructor(
     private readonly renderer: RendererService,
@@ -160,6 +162,8 @@ export class PlanetScene implements IScene {
       this.burstDistrict(district as DistrictId);
     });
 
+    this.rig.addOccluders(this.cameraOccluders);
+
     this.quests.reevaluate();
     this.bus.emit('scene:entered', { id: this.id });
   }
@@ -205,6 +209,7 @@ export class PlanetScene implements IScene {
 
   update(dt: number): void {
     if (this.paused) return;
+    this.lastDelta = dt;
     this.world.update(dt);
     this.updateSun();
     this.illumination.update(dt);
@@ -236,7 +241,7 @@ export class PlanetScene implements IScene {
   }
 
   render(): void {
-    this.renderer.render(this.world.scene);
+    this.renderer.render(this.world.scene, this.lastDelta);
   }
 
   dispose(): void {
@@ -329,6 +334,9 @@ export class PlanetScene implements IScene {
         input: this.input,
         bus: this.bus,
         camera: this.renderer.camera,
+        // The rig is created just below; the closure defers the lookup so the
+        // controller always reads the current, stable tangent heading.
+        heading: (out) => (this.rig ? this.rig.getHeading(out) : out.set(0, 0, 1)),
       }),
     );
 
@@ -389,6 +397,8 @@ export class PlanetScene implements IScene {
       );
       for (const mesh of buildDistrictProps(def.id, propSpots, def.id.length * 331)) {
         this.world.scene.add(mesh);
+        // Scenery has to block the camera, or it parks inside a rock.
+        this.cameraOccluders.push(mesh);
       }
     }
 

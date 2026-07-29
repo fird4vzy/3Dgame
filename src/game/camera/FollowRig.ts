@@ -43,6 +43,16 @@ export class FollowRig {
   private currentArm: number = tuning.camera.armLength;
   private initialised = false;
 
+  /**
+   * Props the camera must not see through.
+   *
+   * The BVH holds only the terrain, so without this a rock, hut or tree
+   * between the camera and the player fills the entire screen — the camera
+   * happily sits inside geometry because nothing told it not to.
+   */
+  private readonly occluders: THREE.Object3D[] = [];
+  private readonly raycaster = new THREE.Raycaster();
+
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
     private readonly input: InputManager,
@@ -137,6 +147,11 @@ export class FollowRig {
     this.camera.lookAt(_target);
   }
 
+  /** Register scenery the camera should pull in front of. */
+  addOccluders(objects: readonly THREE.Object3D[]): void {
+    this.occluders.push(...objects);
+  }
+
   /** The rig's current heading, so the controller can move camera-relative. */
   getHeading(out: THREE.Vector3): THREE.Vector3 {
     return out.copy(this.heading);
@@ -167,9 +182,21 @@ export class FollowRig {
     if (distance < 1e-4) return;
     _toCamera.divideScalar(distance);
 
-    const hit = this.world.raycast(target, _toCamera, distance);
-    if (hit) {
-      const safe = Math.max(0.8, hit.distance - tuning.camera.occlusionRadius);
+    // Terrain first — it is the most common occluder and the BVH is cheapest.
+    let nearest = this.world.raycast(target, _toCamera, distance)?.distance ?? Infinity;
+
+    // Then scenery. Instanced props raycast correctly, so one call covers every
+    // instance of a prop type.
+    if (this.occluders.length > 0) {
+      this.raycaster.set(target, _toCamera);
+      this.raycaster.far = distance;
+      for (const hit of this.raycaster.intersectObjects(this.occluders, false)) {
+        if (hit.distance < nearest) nearest = hit.distance;
+      }
+    }
+
+    if (nearest < Infinity) {
+      const safe = Math.max(0.8, nearest - tuning.camera.occlusionRadius);
       this.currentArm = Math.min(this.currentArm, safe);
     } else {
       this.currentArm = Math.min(

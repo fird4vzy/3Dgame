@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { EventBus } from '@core/events/EventBus';
 import type { Viewport } from '@engine/platform/Viewport';
 import { clamp } from '@core/math/spherical';
+import { PostFX } from './PostFX';
 
 const BASE_VFOV_DEG = 55;
 const BASE_ASPECT = 16 / 9;
@@ -23,6 +24,7 @@ const MAX_FOV = 82;
 export class RendererService {
   readonly renderer: THREE.WebGLRenderer;
   readonly camera: THREE.PerspectiveCamera;
+  readonly postFX: PostFX;
 
   private resolutionScale = 1;
   private targetScale = 1;
@@ -51,6 +53,7 @@ export class RendererService {
     }
 
     this.camera = new THREE.PerspectiveCamera(BASE_VFOV_DEG, 1, 0.1, 400);
+    this.postFX = new PostFX(this.renderer, this.camera, viewport.tier);
 
     canvas.addEventListener('webglcontextlost', this.onContextLost);
     canvas.addEventListener('webglcontextrestored', this.onContextRestored);
@@ -84,12 +87,13 @@ export class RendererService {
     }
   }
 
-  render(scene: THREE.Scene): void {
+  render(scene: THREE.Scene, deltaTime = 1 / 60): void {
     if (this.contextLost) return;
-    this.renderer.render(scene, this.camera);
+    this.postFX.render(scene, deltaTime);
   }
 
   dispose(): void {
+    this.postFX.dispose();
     const canvas = this.renderer.domElement;
     canvas.removeEventListener('webglcontextlost', this.onContextLost);
     canvas.removeEventListener('webglcontextrestored', this.onContextRestored);
@@ -102,6 +106,7 @@ export class RendererService {
 
     this.renderer.setPixelRatio(this.viewport.dpr * this.resolutionScale);
     this.renderer.setSize(w, h, false);
+    this.postFX?.setSize(w, h);
 
     this.camera.aspect = w / h;
     this.applyFov();

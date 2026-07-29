@@ -84,8 +84,8 @@ const P = {
   neckY: 0.52,
   headR: 0.113,
   shoulderX: 0.19,
-  upperArm: 0.28,
-  foreArm: 0.25,
+  upperArm: 0.31,
+  foreArm: 0.29,
   hipX: 0.095,
   thigh: 0.40,
   shin: 0.38,
@@ -208,16 +208,28 @@ export function buildRen(): RenRig {
   hairMain.position.set(0, 0.035, -0.008);
   head.add(hairMain);
 
-  for (const [x, y, z, s] of [
-    [-0.07, 0.08, 0.03, 0.55],
-    [0.06, 0.09, 0.01, 0.6],
-    [0.0, 0.10, -0.06, 0.62],
-    [-0.03, 0.12, 0.05, 0.45],
+  // Tufts are weighted up and to one side so the shape reads as *swept* rather
+  // than as a symmetric cap — that asymmetry is most of what makes the sheet's
+  // hair recognisable at low poly.
+  for (const [x, y, z, r, sy] of [
+    [-0.085, 0.075, 0.020, 0.58, 1.0],
+    [0.055, 0.100, 0.010, 0.62, 1.1],
+    [0.000, 0.112, -0.055, 0.64, 0.9],
+    [-0.040, 0.132, 0.045, 0.50, 1.2],
+    [0.075, 0.070, -0.045, 0.52, 1.0],
+    [-0.020, 0.150, -0.010, 0.42, 1.3],
   ] as const) {
-    const tuft = mesh(new THREE.SphereGeometry(P.headR * s, 8, 6), REN_PALETTE.hair, meshes);
+    const tuft = mesh(new THREE.SphereGeometry(P.headR * r, 8, 6), REN_PALETTE.hair, meshes);
     tuft.position.set(x, y, z);
+    tuft.scale.set(1, sy, 1);
     head.add(tuft);
   }
+
+  // A fringe over the brow, which is what stops the face reading as a bare ball.
+  const fringe = mesh(new THREE.BoxGeometry(0.19, 0.045, 0.055), REN_PALETTE.hair, meshes);
+  fringe.position.set(-0.012, 0.072, P.headR * 0.78);
+  fringe.rotation.z = -0.16;
+  head.add(fringe);
 
   // Glasses: Ren's signature, and the easiest thing to get wrong. Pushed too
   // bright the two lenses bleed into one another and read as a solid visor
@@ -277,11 +289,30 @@ export function buildRen(): RenRig {
     foreMesh.position.y = -P.foreArm / 2;
     fore.add(foreMesh);
 
-    const hand = mesh(new THREE.BoxGeometry(0.075, 0.10, 0.055), REN_PALETTE.skin, meshes);
-    hand.position.y = -P.foreArm - 0.04;
-    fore.add(hand);
+    // Fingerless gloves, as on the sheet: a dark cuff, a dark palm, and bare
+    // fingers. Three primitives, but it stops the hand reading as a block.
+    const cuff = mesh(new THREE.BoxGeometry(0.062, 0.045, 0.062), REN_PALETTE.jacketDark, meshes);
+    cuff.position.y = -P.foreArm - 0.005;
+    fore.add(cuff);
 
-    return { upper, fore, hand };
+    const palm = mesh(new THREE.BoxGeometry(0.058, 0.070, 0.052), REN_PALETTE.boots, meshes);
+    palm.position.y = -P.foreArm - 0.055;
+    fore.add(palm);
+
+    const fingers = mesh(new THREE.BoxGeometry(0.054, 0.045, 0.046), REN_PALETTE.skin, meshes);
+    fingers.position.y = -P.foreArm - 0.108;
+    fore.add(fingers);
+
+    const thumb = mesh(new THREE.BoxGeometry(0.022, 0.040, 0.026), REN_PALETTE.skin, meshes);
+    thumb.position.set(side * 0.036, -P.foreArm - 0.070, 0.008);
+    fore.add(thumb);
+
+    // Elbow pad breaks the straight tube of the forearm.
+    const elbowPad = mesh(new THREE.BoxGeometry(0.072, 0.075, 0.072), REN_PALETTE.jacketDark, meshes);
+    elbowPad.position.y = -0.018;
+    fore.add(elbowPad);
+
+    return { upper, fore, hand: palm };
   };
 
   const left = makeArm(-1);
@@ -324,6 +355,12 @@ export function buildRen(): RenRig {
     );
     shinMesh.position.y = -P.shin / 2;
     shin.add(shinMesh);
+
+    // Knee pad — a hard edge at the joint, so the leg reads as two segments
+    // rather than one bent tube when the gait is at full swing.
+    const knee = mesh(new THREE.BoxGeometry(0.085, 0.085, 0.088), REN_PALETTE.jacketDark, meshes);
+    knee.position.set(0, -0.012, 0.012);
+    shin.add(knee);
 
     // The boot hangs from the ankle by exactly `footDrop`, so the sole's
     // underside is the lowest point of the whole rig and sits at y=0.

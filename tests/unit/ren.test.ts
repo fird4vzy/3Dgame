@@ -66,6 +66,23 @@ describe('Ren rig', () => {
     expect(gap).toBeGreaterThan(width);
   });
 
+  it('gives him arms long enough to reach mid-thigh', () => {
+    const rig = buildRen();
+    // Stubby arms were the most obvious flaw in the first pass. On a real
+    // figure the fingertips fall around mid-thigh; measure the hand's world
+    // height against the knee to keep that true.
+    const hand = new THREE.Vector3();
+    rig.handSocket.updateWorldMatrix(true, false);
+    hand.setFromMatrixPosition(rig.handSocket.matrixWorld);
+
+    const knee = new THREE.Vector3();
+    rig.shinR.updateWorldMatrix(true, false);
+    knee.setFromMatrixPosition(rig.shinR.matrixWorld);
+
+    expect(hand.y).toBeGreaterThan(knee.y);
+    expect(hand.y).toBeLessThan(knee.y + 0.45);
+  });
+
   it('uses a palette light enough to read against a dusk sky', () => {
     // The concept art is very dark; these are the lifted gameplay values.
     // Measured in sRGB — three converts to linear working space on construction,

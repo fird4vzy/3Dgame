@@ -118,6 +118,28 @@ async function travelTo(setTarget, stopAt = 2.0, timeoutMs = 90000) {
   return false;
 }
 
+/**
+ * Close the last couple of metres in short, re-aimed steps.
+ *
+ * Holding W and polling is not precise enough: every steering correction costs
+ * several browser round-trips, so the character covers about a metre between
+ * samples and sails straight past a 2.4 m interaction radius. Tapping forward
+ * and re-aiming converges the way a player actually does it.
+ */
+async function closeUntilFocused(tries = 14) {
+  for (let i = 0; i < tries; i++) {
+    const focused = await page.evaluate(() => window.__lumenpost.scene.interaction.current?.id ?? null);
+    if (focused) return true;
+
+    await faceTarget();
+    await page.keyboard.down('KeyW');
+    await page.waitForTimeout(110);
+    await page.keyboard.up('KeyW');
+    await page.waitForTimeout(240);
+  }
+  return false;
+}
+
 const read = () =>
   page.evaluate(() => {
     const s = window.__lumenpost.scene;
@@ -148,9 +170,19 @@ const reachedGiver = await travelTo(() => {
 }, 2.0);
 check('reached the postmaster', reachedGiver);
 
-await page.waitForTimeout(400);
+await closeUntilFocused();
+await page.waitForTimeout(300);
 const atGiver = await read();
-check('interaction prompt appears', atGiver.focus !== null, String(atGiver.focus));
+const giverDist = await page.evaluate(() => {
+  const s = window.__lumenpost.scene;
+  const obj = s.objectiveTarget;
+  return obj ? +s.player.object3D.position.distanceTo(obj.position).toFixed(2) : null;
+});
+check(
+  'interaction prompt appears',
+  atGiver.focus !== null,
+  `focus=${atGiver.focus} distanceToGiver=${giverDist}m (radius 2.4)`,
+);
 
 console.log('\naccept the contract');
 await page.keyboard.press('KeyE');
@@ -181,6 +213,7 @@ const reachedRecipient = await travelTo(() => {
 }, 2.0);
 check('reached the recipient', reachedRecipient);
 
+await closeUntilFocused();
 const warmthEnd = await page.evaluate(() =>
   window.__lumenpost.scene.warmth.warmthOf('c01_landing'),
 );
