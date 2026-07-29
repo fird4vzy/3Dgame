@@ -6,6 +6,7 @@ import type { EventBus } from '@core/events/EventBus';
 import { tuning } from '@config/tuning';
 import { GRAVITY, PLAYER_HEIGHT, PLAYER_RADIUS } from '@config/constants';
 import { PlanetTerrain } from '@game/world/PlanetTerrain';
+import { computeMovementBasis, inputToWorld } from './movementBasis';
 
 export type LocomotionState = 'idle' | 'walking' | 'running' | 'jumping' | 'falling' | 'landing';
 
@@ -24,6 +25,7 @@ const _lookMatrix = new THREE.Matrix4();
 const _rayOrigin = new THREE.Vector3();
 const _down = new THREE.Vector3();
 const _tmp = new THREE.Vector3();
+const _camForward = new THREE.Vector3();
 
 export interface ControllerDeps {
   world: BvhWorld;
@@ -90,20 +92,14 @@ export class SphericalCharacterController extends Component {
 
     // 2. Camera-relative tangent basis. Projecting the camera's forward onto the
     //    tangent plane is what makes "W" mean "away from the camera" no matter
-    //    where on the sphere the player is standing.
-    this.deps.camera.getWorldDirection(_forward);
-    _forward.projectOnPlane(_up);
-    if (_forward.lengthSq() < 1e-6) {
-      // Camera is looking straight down the up axis — pick any tangent.
-      _forward.set(0, 1, 0).projectOnPlane(_up);
-      if (_forward.lengthSq() < 1e-6) _forward.set(1, 0, 0).projectOnPlane(_up);
-    }
-    _forward.normalize();
-    _right.copy(_forward).cross(_up).normalize().negate();
+    //    where on the sphere the player is standing. The sign convention lives
+    //    in computeMovementBasis, where it is unit-tested.
+    this.deps.camera.getWorldDirection(_camForward);
+    const basis = computeMovementBasis(_camForward, _up, _forward, _right);
 
     // 3. Desired velocity in the tangent plane.
     const move = this.deps.input.getAxis2D('move');
-    _wish.set(0, 0, 0).addScaledVector(_right, move.x).addScaledVector(_forward, move.y);
+    inputToWorld(move, basis, _wish);
     const inputMagnitude = Math.min(_wish.length(), 1);
     if (inputMagnitude > 1e-4) _wish.normalize();
 
