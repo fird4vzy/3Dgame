@@ -3,6 +3,7 @@ import type { EventBus } from '@core/events/EventBus';
 import type { AudioManager } from '@engine/audio/AudioManager';
 import type { IAssetManager } from '@engine/assets/types';
 import type { SurfaceType } from '@core/events/EventMap';
+import { DISTRICTS } from '../../data/content';
 
 const STEM_IDS = ['base', 'bass', 'guitar', 'arp', 'strings', 'choir'] as const;
 
@@ -47,7 +48,36 @@ export class SoundBoard {
 
     if (registered === 0) return;
     this.audio.music.start();
-    if (litDistricts.length > 0) this.audio.music.restore(['base', ...litDistricts]);
+
+    if (litDistricts.length > 0) {
+      // The save stores *district* ids; stems are named after instruments.
+      // "landing" is not "bass", so passing the ids straight through restores
+      // no music at all — the mapping lives in the district data and has to be
+      // looked up.
+      const stems = litDistricts
+        .map((id) => DISTRICTS.find((d) => d.id === id)?.stem)
+        .filter((stem): stem is string => Boolean(stem));
+      this.audio.music.restore(['base', ...stems]);
+    }
+  }
+
+  /**
+   * Register and start the district ambience beds.
+   *
+   * Same rule as the music: every bed starts at once and stays running, so
+   * crossing a district boundary is a crossfade rather than a start.
+   */
+  startAmbience(): void {
+    if (this.audio.ambience.isPlaying) return;
+
+    let registered = 0;
+    for (const district of DISTRICTS) {
+      const buffer = this.assets.tryGet<AudioBuffer>(`amb_${district.id}`);
+      if (!buffer) continue;
+      this.audio.ambience.addBed(district.id, buffer);
+      registered++;
+    }
+    if (registered > 0) this.audio.ambience.start();
   }
 
   private play(id: string, options: Parameters<AudioManager['play']>[1] = {}): void {
@@ -119,6 +149,11 @@ export class SoundBoard {
 
     this.bus.on('dialogue:line', () => {
       this.play('sfx_ui_hover', { bus: 'voice', volume: 0.22, pitchVariation: 3, priority: 0 });
+    });
+
+    // The bed follows the player across district boundaries.
+    this.bus.on('district:entered', ({ district }) => {
+      this.audio.ambience.setDistrict(district);
     });
 
     this.bus.on('ui:requestPause', () => this.play('sfx_ui_click', { bus: 'ui', volume: 0.4 }));

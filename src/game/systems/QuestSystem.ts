@@ -55,6 +55,17 @@ export class QuestSystem {
   }
 
   /** Restore from a save, without replaying any events. */
+  /** Return every contract to its starting state, for a fresh run. */
+  reset(): void {
+    for (const record of this.records.values()) {
+      record.state = 'locked';
+      record.rating = null;
+      record.acceptedAt = null;
+      record.seconds = null;
+    }
+    this.reevaluate();
+  }
+
   restore(completedIds: readonly string[]): void {
     for (const id of completedIds) {
       const record = this.records.get(id);

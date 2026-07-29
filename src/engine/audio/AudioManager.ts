@@ -1,4 +1,5 @@
 import { MusicDirector } from './MusicDirector';
+import { AmbienceDirector } from './AmbienceDirector';
 
 export type AudioBus = 'music' | 'sfx' | 'ambience' | 'ui' | 'voice';
 
@@ -30,6 +31,7 @@ const MAX_VOICES = 24;
 export class AudioManager {
   readonly context: AudioContext;
   readonly music: MusicDirector;
+  readonly ambience: AmbienceDirector;
 
   private readonly masterGain: GainNode;
   private readonly busGains: Record<AudioBus, GainNode>;
@@ -55,6 +57,7 @@ export class AudioManager {
     for (const gain of Object.values(this.busGains)) gain.connect(this.masterGain);
 
     this.music = new MusicDirector(this.context, this.busGains.music);
+    this.ambience = new AmbienceDirector(this.context, this.busGains.ambience);
     this.installUnlockHandler();
   }
 
@@ -204,6 +207,7 @@ export class AudioManager {
     }
     this.voices.length = 0;
     this.music.dispose();
+    this.ambience.dispose();
     void this.context.close();
   }
 

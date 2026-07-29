@@ -1,5 +1,7 @@
 import type { EventBus } from '@core/events/EventBus';
 import './theme/tokens.css';
+import { GamepadNavigator } from './GamepadNavigator';
+import { TransitionService } from './TransitionService';
 
 export interface UIScreen {
   readonly id: string;
@@ -28,6 +30,8 @@ export class UIManager {
   private readonly hudLayer: HTMLElement;
   private readonly toastLayer: HTMLElement;
   private previousFocus: HTMLElement | null = null;
+  private navigator: GamepadNavigator | null = null;
+  readonly transitions: TransitionService;
 
   constructor(
     container: HTMLElement,
@@ -53,6 +57,9 @@ export class UIManager {
 
     this.root.append(this.hudLayer, this.toastLayer);
     container.appendChild(this.root);
+
+    // The wipe lives above every layer, including toasts.
+    this.transitions = new TransitionService(this.root);
 
     window.addEventListener('keydown', this.onKeyDown);
   }
@@ -85,6 +92,15 @@ export class UIManager {
     this.stack.push({ screen, element });
     screen.onEnter?.();
     this.focusFirst(element);
+    this.bindNavigator(screen, element);
+  }
+
+  /** Gamepad navigation always follows whichever screen is on top. */
+  private bindNavigator(screen: UIScreen, element: HTMLElement): void {
+    this.navigator = new GamepadNavigator(element, () => {
+      if (screen.onBack?.()) return;
+      this.pop();
+    });
   }
 
   pop(): void {
@@ -95,12 +111,22 @@ export class UIManager {
     entry.element.remove();
 
     const next = this.stack[this.stack.length - 1];
-    if (next) this.focusFirst(next.element);
-    else this.previousFocus?.focus();
+    if (next) {
+      this.focusFirst(next.element);
+      this.bindNavigator(next.screen, next.element);
+    } else {
+      this.navigator = null;
+      this.previousFocus?.focus();
+    }
   }
 
   popAll(): void {
     while (this.stack.length > 0) this.pop();
+  }
+
+  /** Poll gamepad menu navigation. Call once per frame from the loop. */
+  update(dt: number): void {
+    this.navigator?.update(dt);
   }
 
   showToast(message: string, durationMs = 2500): void {
@@ -140,6 +166,7 @@ export class UIManager {
   dispose(): void {
     window.removeEventListener('keydown', this.onKeyDown);
     this.popAll();
+    this.transitions.dispose();
     this.root.remove();
   }
 

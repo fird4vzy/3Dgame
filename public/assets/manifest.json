@@ -136,6 +136,41 @@
           "bytes": 2421
         }
       ]
+    },
+    {
+      "id": "audio_ambience",
+      "assets": [
+        {
+          "id": "amb_landing",
+          "type": "audio",
+          "url": "assets/audio/ambience/amb_landing.{ext}",
+          "bytes": 150906
+        },
+        {
+          "id": "amb_bramblewood",
+          "type": "audio",
+          "url": "assets/audio/ambience/amb_bramblewood.{ext}",
+          "bytes": 150336
+        },
+        {
+          "id": "amb_coil",
+          "type": "audio",
+          "url": "assets/audio/ambience/amb_coil.{ext}",
+          "bytes": 156872
+        },
+        {
+          "id": "amb_tidebreak",
+          "type": "audio",
+          "url": "assets/audio/ambience/amb_tidebreak.{ext}",
+          "bytes": 148383
+        },
+        {
+          "id": "amb_spire",
+          "type": "audio",
+          "url": "assets/audio/ambience/amb_spire.{ext}",
+          "bytes": 160876
+        }
+      ]
     }
   ]
 }

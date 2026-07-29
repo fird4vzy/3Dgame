@@ -47,6 +47,17 @@ export class ShardSystem {
     return this.collectedCount;
   }
 
+  /** Make every shard collectable again, for a fresh run. */
+  reset(): void {
+    for (const shard of this.shards.values()) {
+      if (!shard.collected) continue;
+      shard.collected = false;
+      shard.object.visible = true;
+      this.hash.insert(shard);
+    }
+    this.collectedCount = 0;
+  }
+
   restore(collectedIds: readonly string[]): void {
     for (const id of collectedIds) {
       const shard = this.shards.get(id);

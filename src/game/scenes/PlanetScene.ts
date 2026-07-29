@@ -110,6 +110,8 @@ export class PlanetScene implements IScene {
   private currentDistrict: DistrictId | null = null;
   private bobTimer = 0;
   private lastDelta = 1 / 60;
+  private menuMode = false;
+  private menuOrbit = 0;
 
   constructor(
     private readonly renderer: RendererService,
@@ -181,6 +183,80 @@ export class PlanetScene implements IScene {
     this.input.setEnabled(!locked && !this.paused);
   }
 
+  /**
+   * Re-apply saved progress.
+   *
+   * Runs after `onEnter`, and restores *silently*: districts snap to lit with
+   * no ignition animation and no `delivery:completed` events are replayed. A
+   * returning player should find the world as they left it, not sit through
+   * five cutscenes.
+   */
+  restoreProgress(progress: {
+    completedContracts: readonly string[];
+    litDistricts: readonly string[];
+    collectedShards: readonly string[];
+  }): void {
+    this.quests.restore(progress.completedContracts);
+    this.illumination.restore(progress.litDistricts);
+    this.shards.restore(progress.collectedShards);
+    this.refreshNpcPrompts();
+  }
+
+  /**
+   * Wipe the world back to its opening state for a fresh run.
+   *
+   * Reloading the page would be simpler and is tempting, but it lands the
+   * player back on the menu instead of in the run they just asked for. Each
+   * system owns a reset symmetrical with its restore, so this is cheap.
+   */
+  resetRun(): void {
+    this.quests.reset();
+    this.illumination.reset();
+    this.shards.reset();
+    this.warmth.clear();
+    this.detachParcel();
+    this.particles.clear();
+    this.refreshNpcPrompts();
+
+    const odd = npcById('odd');
+    if (odd) {
+      const spawn = surfacePoint({ lat: odd.at.lat - 2.2, lon: odd.at.lon + 1.4 }, 0.2);
+      this.player.object3D.position.copy(spawn);
+      this.controller.velocity.set(0, 0, 0);
+      _forward.set(0, 1, 0).projectOnPlane(spawn.clone().normalize());
+      if (_forward.lengthSq() < 1e-6) _forward.set(1, 0, 0);
+      this.rig.reset(spawn, _forward.normalize());
+    }
+  }
+
+  /**
+   * Menu mode: the player is frozen and the camera drifts slowly around the
+   * planet, so the main menu has a live backdrop rather than a still image.
+   * The world is already loaded, so this costs nothing but a camera path.
+   */
+  setMenuMode(active: boolean): void {
+    this.menuMode = active;
+    this.input.setEnabled(!active && !this.paused && !this.playerLocked);
+
+    // The shadow frustum is sized tightly around the player for gameplay. From
+    // the menu's orbital camera that box is visible as a hard rectangular seam
+    // across the planet, so shadows come off entirely while in orbit.
+    if (this.sun) this.sun.castShadow = !active && this.renderer.renderer.shadowMap.enabled;
+    if (!active) {
+      this.player.object3D.getWorldDirection(_forward);
+      this.rig.reset(this.controller.smoothedPosition, _forward);
+    }
+  }
+
+  get isMenuMode(): boolean {
+    return this.menuMode;
+  }
+
+  /** Which district the player is standing in right now. */
+  get currentDistrictId(): DistrictId {
+    return this.districts.at(this.player.object3D.position).def.id;
+  }
+
   setCharacter(character: LoadedCharacter): void {
     this.character?.dispose();
     this.character = character;
@@ -192,7 +268,7 @@ export class PlanetScene implements IScene {
   }
 
   fixedUpdate(dt: number): void {
-    if (this.paused) return;
+    if (this.paused || this.menuMode) return;
     this.world.fixedUpdate(dt);
     this.warmth.tick(dt);
 
@@ -231,7 +307,9 @@ export class PlanetScene implements IScene {
   lateUpdate(dt: number): void {
     if (this.paused) return;
     this.world.lateUpdate(dt);
-    this.rig.update(dt, this.controller.smoothedPosition);
+
+    if (this.menuMode) this.updateMenuCamera(dt);
+    else this.rig.update(dt, this.controller.smoothedPosition);
     this.cullBelowHorizon();
 
     if (this.character) {
@@ -676,6 +754,25 @@ export class PlanetScene implements IScene {
   }
 
   // ── per-frame helpers ───────────────────────────────────────────────────
+
+  /** A slow high orbit of the planet, framing it whole behind the menu. */
+  private updateMenuCamera(dt: number): void {
+    this.menuOrbit += dt * 0.06;
+
+    const camera = this.renderer.camera;
+    // Far enough that the whole planet sits in frame with sky around it — the
+    // menu shot is selling "this world is small", so it has to fit.
+    const radius = PLANET_RADIUS + 78;
+    camera.position.set(
+      Math.cos(this.menuOrbit) * radius,
+      PLANET_RADIUS * 0.3,
+      Math.sin(this.menuOrbit) * radius,
+    );
+    // A menu shot is a conventional framing, so world up is right here —
+    // unlike gameplay, where up is local to the player's position.
+    camera.up.set(0, 1, 0);
+    camera.lookAt(0, 0, 0);
+  }
 
   private syncCharacterAnimation(dt: number): void {
     if (!this.character) return;

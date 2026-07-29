@@ -399,6 +399,122 @@ function uiTick(frequency, seconds, wave = 'sine') {
   return normalise(out, 0.35);
 }
 
+// ── ambience beds ─────────────────────────────────────────────────────────
+
+const AMBIENCE_SECONDS = 20;
+
+/**
+ * Make a buffer loop seamlessly by cross-fading its tail over its head.
+ *
+ * Noise beds are the one place a loop discontinuity is unmissable — a click
+ * every twenty seconds is worse than no ambience at all. The fade is
+ * equal-power; a linear one dips in the middle and reads as a dropout.
+ */
+function seamless(out, fadeSeconds = 2) {
+  const fade = Math.floor(fadeSeconds * SAMPLE_RATE);
+  const length = out.length;
+  if (fade * 2 >= length) return out;
+
+  const body = new Float32Array(length - fade);
+  body.set(out.subarray(0, length - fade));
+
+  for (let i = 0; i < fade; i++) {
+    const t = i / fade;
+    const a = Math.cos((t * Math.PI) / 2);
+    const b = Math.sin((t * Math.PI) / 2);
+    body[i] = body[i] * b + out[length - fade + i] * a;
+  }
+  return body;
+}
+
+/** Slowly-modulated filtered noise — the substrate of every bed. */
+function windBed(out, { lowpass, gain, swellRate, swellDepth = 0.5, highpass = 0 }) {
+  let lp = 0;
+  let hp = 0;
+  let prev = 0;
+  for (let i = 0; i < out.length; i++) {
+    const t = i / SAMPLE_RATE;
+    // Two detuned LFOs so the swell never sounds metronomic.
+    const swell =
+      1 - swellDepth +
+      swellDepth *
+        (0.5 + 0.35 * Math.sin(2 * Math.PI * swellRate * t) +
+          0.15 * Math.sin(2 * Math.PI * swellRate * 1.7 * t + 1.1));
+
+    lp += (Math.random() * 2 - 1 - lp) * lowpass;
+    let value = lp;
+    if (highpass > 0) {
+      hp = highpass * (hp + value - prev);
+      prev = value;
+      value = hp;
+    }
+    out[i] += value * gain * swell;
+  }
+}
+
+const ambBuffer = () => new Float32Array(AMBIENCE_SECONDS * SAMPLE_RATE);
+
+function ambLanding() {
+  const out = ambBuffer();
+  windBed(out, { lowpass: 0.06, gain: 0.5, swellRate: 0.07 });
+  for (let i = 0; i < 5; i++) {
+    note(out, {
+      start: 1.5 + i * 3.7, duration: 2.4,
+      frequency: hz(['E5', 'A5', 'C6'][i % 3]),
+      gain: 0.05, wave: 'sine', env: [0.02, 1.2, 0.1, 1.1],
+    });
+  }
+  return normalise(seamless(out), 0.4);
+}
+
+function ambBramblewood() {
+  const out = ambBuffer();
+  // Leaves: brighter and faster than open wind.
+  windBed(out, { lowpass: 0.35, highpass: 0.55, gain: 0.4, swellRate: 0.22, swellDepth: 0.7 });
+  for (let i = 0; i < 7; i++) {
+    const start = 0.8 + i * 2.6;
+    note(out, { start, duration: 0.1, frequency: 1400 + Math.random() * 900, gain: 0.05, wave: 'sine', env: [0.01, 0.05, 0.1, 0.04] });
+    note(out, { start: start + 0.13, duration: 0.09, frequency: 1900 + Math.random() * 700, gain: 0.04, wave: 'sine', env: [0.01, 0.04, 0.1, 0.04] });
+  }
+  return normalise(seamless(out), 0.36);
+}
+
+function ambCoil() {
+  const out = ambBuffer();
+  // Machine hum under intermittent steam.
+  note(out, { start: 0, duration: AMBIENCE_SECONDS, frequency: 55, gain: 0.16, wave: 'triangle', detune: 0.01, env: [0.5, 0.5, 1, 0.5] });
+  note(out, { start: 0, duration: AMBIENCE_SECONDS, frequency: 110, gain: 0.07, wave: 'sine', env: [0.5, 0.5, 1, 0.5] });
+  windBed(out, { lowpass: 0.5, highpass: 0.6, gain: 0.22, swellRate: 0.31, swellDepth: 0.9 });
+  for (let i = 0; i < 4; i++) {
+    noiseBurst(out, { start: 2 + i * 4.9, duration: 0.9, gain: 0.14, lowpass: 0.7, highpass: 0.5 });
+  }
+  return normalise(seamless(out), 0.4);
+}
+
+function ambTidebreak() {
+  const out = ambBuffer();
+  // Deep swell with a brighter crest riding on it.
+  windBed(out, { lowpass: 0.05, gain: 0.55, swellRate: 0.11, swellDepth: 0.85 });
+  windBed(out, { lowpass: 0.4, highpass: 0.4, gain: 0.16, swellRate: 0.11, swellDepth: 0.95 });
+  return normalise(seamless(out), 0.42);
+}
+
+function ambSpire() {
+  const out = ambBuffer();
+  // Thin, exposed, and quieter than everywhere else.
+  windBed(out, { lowpass: 0.14, highpass: 0.35, gain: 0.42, swellRate: 0.09, swellDepth: 0.65 });
+  note(out, { start: 0, duration: AMBIENCE_SECONDS, frequency: hz('A5'), gain: 0.02, wave: 'sine', detune: 0.01, env: [3, 2, 1, 3] });
+  return normalise(seamless(out), 0.3);
+}
+
+const AMBIENCE = {
+  amb_landing: ambLanding,
+  amb_bramblewood: ambBramblewood,
+  amb_coil: ambCoil,
+  amb_tidebreak: ambTidebreak,
+  amb_spire: ambSpire,
+};
+
 // ── build ─────────────────────────────────────────────────────────────────
 
 const MUSIC = {
@@ -440,9 +556,10 @@ function main() {
   const outDir = process.argv[2] ?? 'public/assets/audio';
   const musicDir = join(outDir, 'music');
   const sfxDir = join(outDir, 'sfx');
+  const ambDir = join(outDir, 'ambience');
   const tmpDir = join(outDir, '.tmp');
 
-  for (const dir of [musicDir, sfxDir, tmpDir]) mkdirSync(dir, { recursive: true });
+  for (const dir of [musicDir, sfxDir, ambDir, tmpDir]) mkdirSync(dir, { recursive: true });
 
   console.log(`tempo ${BPM} BPM · loop ${LOOP_SECONDS.toFixed(1)}s · A minor`);
 
@@ -458,6 +575,13 @@ function main() {
     writeFileSync(wav, toWav(generate()));
     encode(wav, join(sfxDir, name));
     console.log(`  sfx/${name}`);
+  }
+
+  for (const [name, generate] of Object.entries(AMBIENCE)) {
+    const wav = join(tmpDir, `${name}.wav`);
+    writeFileSync(wav, toWav(generate()));
+    encode(wav, join(ambDir, name));
+    console.log(`  ambience/${name}`);
   }
 
   rmSync(tmpDir, { recursive: true, force: true });

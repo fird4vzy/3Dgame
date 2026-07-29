@@ -1,0 +1,58 @@
+{
+  "game.title": "Lumenpost",
+  "game.tagline": "A tiny planet. A bag full of light. Everyone's waiting.",
+
+  "menu.continue": "Continue",
+  "menu.continueDetail": "{done} of {total} delivered",
+  "menu.newRun": "New run",
+  "menu.newRunConfirm": "Start over? Your current progress will be lost.",
+  "menu.start": "Begin",
+  "menu.settings": "Settings",
+  "menu.back": "Back",
+
+  "hud.near": "Near",
+  "hud.shortWalk": "A short walk",
+  "hud.acrossWorld": "Across the world",
+
+  "pause.title": "Paused",
+  "pause.resume": "Resume",
+  "pause.quit": "Quit to menu",
+  "pause.hint": "Esc or Start to resume · WASD move · Shift run · Space jump",
+
+  "settings.title": "Settings",
+  "settings.audio": "Audio",
+  "settings.controls": "Controls",
+  "settings.accessibility": "Accessibility",
+  "settings.video": "Video",
+  "settings.master": "Master volume",
+  "settings.music": "Music",
+  "settings.sfx": "Sound effects",
+  "settings.ambience": "Ambience",
+  "settings.reduceMotion": "Reduce motion",
+  "settings.cameraShake": "Camera shake",
+  "settings.invertY": "Invert vertical look",
+  "settings.sensitivity": "Look sensitivity",
+  "settings.uiScale": "Interface size",
+  "settings.subtitles": "Subtitles",
+  "settings.resetProgress": "Reset progress",
+  "settings.resetConfirm": "Erase all progress? This cannot be undone.",
+
+  "report.title": "The planet is lit",
+  "report.subtitle": "Every lumen delivered. Fennwick is awake.",
+  "report.keepExploring": "Keep exploring",
+
+  "rating.bright": "Bright",
+  "rating.warm": "Warm",
+  "rating.cool": "Cool",
+
+  "toast.districtLit": "{name} is awake — {count} of {total}",
+  "toast.shard": "Lumen shard {count}/{total}",
+  "toast.delivered": "Delivered — {rating}",
+
+  "loading.shaping": "Shaping the planet…",
+  "loading.waking": "Waking the courier…",
+  "loading.ready": "Ready",
+
+  "error.webgl": "This browser does not support WebGL2, which Lumenpost needs to run.",
+  "error.boot": "Something went wrong while starting the game."
+}

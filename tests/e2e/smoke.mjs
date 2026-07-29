@@ -62,8 +62,32 @@ const consoleErrors = [];
 page.on('console', (m) => m.type() === 'error' && consoleErrors.push(m.text()));
 page.on('pageerror', (e) => consoleErrors.push(`PAGEERROR: ${e.message}`));
 
+
+/**
+ * Dismiss the main menu and begin a run.
+ *
+ * The game boots into the menu, so every gameplay test starts by doing what a
+ * player does. Accepts either label, since "Continue" replaces "Begin" once a
+ * save exists.
+ */
+async function beginRun(page) {
+  await page.waitForFunction(() => window.__lumenpost?.scene, null, { timeout: 60000 });
+  if (await page.evaluate(() => !window.__lumenpost.scene.isMenuMode)) return;
+
+  for (const label of ['Begin', 'Continue']) {
+    const button = page.getByRole('button', { name: label, exact: true });
+    if ((await button.count()) > 0) {
+      await button.first().click();
+      break;
+    }
+  }
+  await page.waitForFunction(() => !window.__lumenpost.scene.isMenuMode, null, { timeout: 20000 });
+  await page.waitForTimeout(700);
+}
+
 await page.goto(URL, { waitUntil: 'load' });
 await page.waitForFunction(() => window.__lumenpost?.scene?.controller, null, { timeout: 60000 });
+await beginRun(page);
 
 const read = () =>
   page.evaluate(() => {

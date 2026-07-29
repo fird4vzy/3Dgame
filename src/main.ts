@@ -17,7 +17,10 @@ import { DialogueOverlay } from '@ui/screens/DialogueOverlay';
 import { RouteReportScreen } from '@ui/screens/RouteReportScreen';
 import { GameStateManager } from '@game/state/GameStateManager';
 import { DebugOverlay } from '@game/debug/DebugOverlay';
-import { DISTRICTS } from './data/content';
+import { DISTRICTS, CONTRACTS } from './data/content';
+import { MainMenuScreen } from '@ui/screens/MainMenuScreen';
+import { SettingsScreen } from '@ui/screens/SettingsScreen';
+import { t, setLocale } from '@engine/i18n/Localization';
 
 export const Tokens = {
   bus: createToken<EventBus>('EventBus'),
@@ -58,7 +61,7 @@ async function bootstrap(): Promise<void> {
 
   // Fail early and legibly rather than throwing a WebGL error into the console.
   if (!canvas.getContext('webgl2')) {
-    return fail('This browser does not support WebGL2, which Lumenpost needs to run.');
+    return fail(t('error.webgl'));
   }
 
   const container = new ServiceContainer();
@@ -76,7 +79,7 @@ async function bootstrap(): Promise<void> {
   const viewport = new Viewport(bus);
   viewport.attach();
   container.registerValue(Tokens.viewport, viewport);
-  setProgress(0.2, 'Shaping the planet…');
+  setProgress(0.2, t('loading.shaping'));
 
   const renderer = new RendererService(canvas, viewport, bus);
   container.registerValue(Tokens.renderer, renderer);
@@ -98,8 +101,15 @@ async function bootstrap(): Promise<void> {
   assets.setAudioContext(audio.context);
   const soundBoard = new SoundBoard(bus, audio, assets);
 
+  setLocale(settings.get().language);
+
   const ui = new UIManager(uiRoot, bus);
   ui.setUiScale(settings.get().uiScale);
+  settings.observe('uiScale', (scale) => ui.setUiScale(scale));
+  ui.transitions.setReduceMotion(settings.prefersReducedMotion);
+  settings.observe('reduceMotion', () =>
+    ui.transitions.setReduceMotion(settings.prefersReducedMotion),
+  );
   container.registerValue(Tokens.ui, ui);
   setProgress(0.5);
 
@@ -109,21 +119,26 @@ async function bootstrap(): Promise<void> {
 
   const scene = new PlanetScene(renderer, input, bus, audio.music);
   await scene.onEnter();
-  setProgress(0.85, 'Waking the courier…');
+  setProgress(0.85, t('loading.waking'));
 
   await attachCharacter(scene);
+  scene.restoreProgress(save.get().progress);
 
   const hud = new Hud(ui.hud, bus);
   const dialogueOverlay = new DialogueOverlay(ui.hud, bus);
   wireGameplay(bus, ui, scene, save, hud);
-  setProgress(1, 'Ready');
+  setProgress(1, t('loading.ready'));
 
   state.send('assetsReady');
-  state.send('startRun');
-  state.send('worldReady');
 
-  const runStartedAt = performance.now();
-  wirePauseFlow(bus, ui, settings, scene, state, audio, runStartedAt);
+  // Open on the menu with the planet turning behind it, rather than dropping
+  // the player straight into a run with no context.
+  scene.setMenuMode(true);
+  hud.setVisible(false);
+  const runClock = { startedAt: performance.now() };
+  wireMenuFlow(bus, ui, settings, scene, state, save, hud, runClock, audio);
+  wirePauseFlow(bus, ui, settings, scene, state, audio, runClock);
+  showMainMenu(bus, ui, settings, save, () => scene.resetRun());
 
   void loadAudio(assets, soundBoard, save);
 
@@ -139,6 +154,7 @@ async function bootstrap(): Promise<void> {
       hud.setTarget(objective?.position ?? null, objective?.hint);
       hud.update(dt, scene.player.object3D.position, scene.cameraForward);
       soundBoard.updateListener(renderer.camera);
+      ui.update(dt);
       renderer.updateAdaptiveResolution(loop.fps, dt);
       debug?.update(dt, loop, scene.controller, scene.player.object3D.position);
     },
@@ -206,12 +222,90 @@ async function loadAudio(
 ): Promise<void> {
   try {
     await assets.loadManifest(`${import.meta.env.BASE_URL}assets/manifest.json`);
-    await Promise.all([assets.acquire('audio_sfx'), assets.acquire('audio_music')]);
+    await Promise.all([
+      assets.acquire('audio_sfx'),
+      assets.acquire('audio_music'),
+      assets.acquire('audio_ambience'),
+    ]);
     soundBoard.startMusic(save.get().progress.litDistricts);
+    soundBoard.startAmbience();
   } catch (error) {
     // Silence is a degraded experience, not a broken one.
     console.warn('[Audio] running without sound', error);
   }
+}
+
+/** Push the main menu, with Settings reachable from it. */
+function showMainMenu(
+  bus: EventBus,
+  ui: UIManager,
+  settings: SettingsManager,
+  save: SaveManager,
+  onResetProgress: () => void,
+): void {
+  const completed = save.get().progress.completedContracts.length;
+  ui.popAll();
+  ui.push(
+    new MainMenuScreen(
+      bus,
+      { completed, total: CONTRACTS.length, hasProgress: completed > 0 },
+      () => {
+        ui.push(
+          new SettingsScreen(bus, settings, () => ui.pop(), () => {
+            // Reset wipes the save and the live world together, so the menu the
+            // player returns to matches what is actually stored.
+            save.reset();
+            onResetProgress();
+            ui.pop();
+            showMainMenu(bus, ui, settings, save, onResetProgress);
+          }),
+        );
+      },
+    ),
+  );
+}
+
+/** Start and quit, both behind the iris wipe. */
+function wireMenuFlow(
+  bus: EventBus,
+  ui: UIManager,
+  settings: SettingsManager,
+  scene: PlanetScene,
+  state: GameStateManager,
+  save: SaveManager,
+  hud: Hud,
+  runClock: { startedAt: number },
+  audio: AudioManager,
+): void {
+  bus.on('ui:requestStart', ({ newRun }) => {
+    // The iris closes over the menu, the world changes behind it, and it opens
+    // on the surface — so the cut from orbit to ground is never seen.
+    void ui.transitions.wrap(() => {
+      if (newRun) {
+        save.reset();
+        scene.resetRun();
+      }
+      ui.popAll();
+      state.send('startRun');
+      state.send('worldReady');
+      scene.setMenuMode(false);
+      hud.setVisible(true);
+      runClock.startedAt = performance.now();
+      audio.ambience.setDistrict(scene.currentDistrictId, 1.2);
+    });
+  });
+
+  bus.on('ui:requestQuit', () => {
+    void ui.transitions.wrap(() => {
+      save.flush();
+      // The menu sits in orbit, so the world's ambience has no business
+      // playing over it.
+      audio.ambience.silence();
+      scene.setMenuMode(true);
+      hud.setVisible(false);
+      showMainMenu(bus, ui, settings, save, () => scene.resetRun());
+    });
+  });
 }
 
 function applyAudioSettings(audio: AudioManager, settings: SettingsManager): void {
@@ -249,15 +343,16 @@ function wirePauseFlow(
   scene: PlanetScene,
   state: GameStateManager,
   audio: AudioManager,
-  runStartedAt: number,
+  runClock: { startedAt: number },
 ): void {
   const pauseScreen = new PauseScreen(bus, settings, () => ({
-    elapsedSeconds: (performance.now() - runStartedAt) / 1000,
+    elapsedSeconds: (performance.now() - runClock.startedAt) / 1000,
     contractsComplete: 0,
     shards: 0,
   }));
 
   const pause = () => {
+    if (scene.isMenuMode) return;
     if (!state.send('pause')) return;
     scene.setPaused(true);
     ui.setHudVisible(false);
@@ -275,9 +370,11 @@ function wirePauseFlow(
 
   bus.on('ui:requestPause', pause);
   bus.on('ui:requestResume', resume);
+  // Quitting is handled by wireMenuFlow; here we only leave the paused state.
   bus.on('ui:requestQuit', () => {
-    resume();
-    ui.showToast('Main menu arrives in Phase 3');
+    if (state.current === 'paused') state.send('resume');
+    scene.setPaused(false);
+    applyAudioSettings(audio, settings);
   });
 
   // Escape is owned entirely by UIManager: with no screen open it emits
@@ -287,7 +384,7 @@ function wirePauseFlow(
   // and immediately re-pause — so the menu could never be dismissed.
 }
 
-bootstrap().catch((error) => fail('Something went wrong while starting the game.', error));
+bootstrap().catch((error) => fail(t('error.boot'), error));
 
 /**
  * Gameplay-to-UI wiring.
@@ -308,11 +405,11 @@ function wireGameplay(
   bus.on('district:lit', ({ district, litCount }) => {
     // Districts are identified by id on the bus; the player sees the name.
     const name = DISTRICTS.find((d) => d.id === district)?.displayName ?? district;
-    ui.showToast(`${name} is awake — ${litCount} of 5`);
+    ui.showToast(t('toast.districtLit', { name, count: litCount, total: DISTRICTS.length }));
   });
 
   bus.on('shard:collected', ({ total, of }) => {
-    ui.showToast(`Lumen shard ${total}/${of}`);
+    ui.showToast(t('toast.shard', { count: total, total: of }));
   });
 
   bus.on('delivery:completed', ({ contractId, rating }) => {
@@ -322,7 +419,7 @@ function wireGameplay(
       }
       draft.stats.deliveriesMade++;
     });
-    ui.showToast(`Delivered — ${rating}`);
+    ui.showToast(t('toast.delivered', { rating: t(`rating.${rating}`) }));
   });
 
   bus.on('district:lit', ({ district }) => {

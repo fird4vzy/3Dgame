@@ -75,6 +75,27 @@ export class IlluminationSystem {
   }
 
   /** Restore a loaded save: districts snap to lit with no animation. */
+  /**
+   * Put every district back to dark, for a fresh run.
+   *
+   * Symmetrical with {@link restore}: instant, silent, no events. Without it,
+   * starting a new run would need a page reload to clear the world — and a
+   * reload drops the player back at the menu instead of into the run they just
+   * asked for.
+   */
+  reset(): void {
+    this.igniting.clear();
+    for (const runtime of this.districts.all) {
+      runtime.lit = false;
+      runtime.light = 0;
+      this.applyLight(runtime, 0);
+    }
+    for (const objects of this.dormant.values()) {
+      for (const object of objects) object.visible = false;
+    }
+    this.updateAmbient();
+  }
+
   restore(litDistricts: readonly string[]): void {
     for (const id of litDistricts) {
       const runtime = this.districts.all.find((d) => d.def.id === id);
