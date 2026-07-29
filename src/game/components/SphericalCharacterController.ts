@@ -266,7 +266,13 @@ export class SphericalCharacterController extends Component {
       _forward.normalize();
     }
 
-    _tmp.copy(transform.position).add(_forward);
+    // `Matrix4.lookAt(eye, target, up)` follows the *camera* convention: the
+    // resulting +Z axis points from the target back toward the eye, because a
+    // camera looks down its own -Z. Characters are authored facing +Z, so
+    // aiming the eye at `position + forward` turns the model 180° — it moves
+    // correctly but moonwalks. Placing the target *behind* by `forward` puts
+    // +Z along the direction of travel, which is what the asset contract says.
+    _tmp.copy(transform.position).sub(_forward);
     _lookMatrix.lookAt(transform.position, _tmp, surfaceUp);
     _targetQuat.setFromRotationMatrix(_lookMatrix);
 

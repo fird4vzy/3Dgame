@@ -11,8 +11,32 @@
  */
 import { chromium } from 'playwright';
 
+/**
+ * Launch a browser, portably.
+ *
+ * CI containers ship a Chromium at a fixed path; developer machines have their
+ * own Chrome. Prefer an explicit override, then the container path if it really
+ * exists, then the locally-installed Chrome, then whatever Playwright bundled.
+ * Hard-coding one of these is why this suite only ran in one place.
+ */
+async function launchBrowser(chromium, args) {
+  const explicit = process.env.LUMENPOST_CHROMIUM;
+  if (explicit) return chromium.launch({ executablePath: explicit, args });
+
+  const { existsSync } = await import('node:fs');
+  const containerPath = '/opt/pw-browsers/chromium';
+  if (existsSync(containerPath)) {
+    return chromium.launch({ executablePath: containerPath, args });
+  }
+
+  try {
+    return await chromium.launch({ channel: 'chrome', args });
+  } catch {
+    return chromium.launch({ args });
+  }
+}
+
 const URL = process.env.LUMENPOST_URL ?? 'http://localhost:5173/';
-const EXECUTABLE = process.env.LUMENPOST_CHROMIUM ?? '/opt/pw-browsers/chromium';
 
 const failures = [];
 const check = (label, ok, detail) => {
@@ -20,10 +44,7 @@ const check = (label, ok, detail) => {
   if (!ok) failures.push(label);
 };
 
-const browser = await chromium.launch({
-  executablePath: EXECUTABLE,
-  args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
-});
+const browser = await launchBrowser(chromium, ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']);
 const page = await browser.newPage({ viewport: { width: 1100, height: 700 } });
 
 const consoleErrors = [];
