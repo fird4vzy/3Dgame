@@ -752,7 +752,7 @@ export class PlanetScene implements IScene {
     material.emissive.copy(colour);
     material.color.copy(colour);
     this.parcelVisual.glow.color.copy(colour);
-    this.parcelVisual.glow.intensity = 3 + warmth * 4;
+    this.parcelVisual.glow.intensity = 1.1 + warmth * 1.1;
   }
 
   /** The hand-off burst: lumen motes rising off the parcel as it changes hands. */

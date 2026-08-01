@@ -45,8 +45,12 @@ export function createParcel(colour: string): { group: THREE.Group; glow: THREE.
   group.name = 'parcel';
 
   const core = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(0.17, 1),
-    createToonMaterial({ color: colour, emissive: colour, emissiveIntensity: 1.8 }),
+    new THREE.IcosahedronGeometry(0.13, 1),
+    // Emissive was 1.8, which is well past the bloom threshold at point-blank
+    // range: carried at chest height it flared into a white disc that erased
+    // the courier behind it. The parcel should read as a lantern she is
+    // holding, not as a light source pointed at the camera.
+    createToonMaterial({ color: colour, emissive: colour, emissiveIntensity: 0.75 }),
   );
   group.add(core);
 
@@ -57,7 +61,9 @@ export function createParcel(colour: string): { group: THREE.Group; glow: THREE.
   cage.rotation.x = Math.PI / 2;
   group.add(cage);
 
-  const glow = new THREE.PointLight(new THREE.Color(colour), 5, 8, 2);
+  // Short range and low intensity: it is lighting her hand and the ground by
+  // her feet, not the whole district.
+  const glow = new THREE.PointLight(new THREE.Color(colour), 1.6, 4.5, 2);
   group.add(glow);
 
   return { group, glow, core };

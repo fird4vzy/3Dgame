@@ -36,6 +36,19 @@ export interface CharacterProportions {
   thigh: number;
   shin: number;
   footLen: number;
+  /**
+   * Torso widths at the chest and the waist.
+   *
+   * These exist because the torso used to be one hardcoded 0.38 m slab for
+   * every character. Silhouette is almost all of what distinguishes one
+   * low-poly figure from another at gameplay distance, and a straight-sided box
+   * with no waist reads as the same broad-shouldered build no matter what the
+   * rest of the spec says.
+   */
+  chestW: number;
+  waistW: number;
+  /** Pelvis width. Together with `shoulderX` this sets the shoulder:hip ratio. */
+  pelvisW: number;
 }
 
 export type HairStyle = 'swept' | 'long';
@@ -85,16 +98,23 @@ const ARIA_PALETTE: CharacterPalette = {
  * narrow more than the hips.
  */
 const ARIA_PROPORTIONS: CharacterProportions = {
-  torsoLen: 0.47,
-  neckY: 0.47,
-  headR: 0.107,
-  shoulderX: 0.152,
-  upperArm: 0.275,
-  foreArm: 0.255,
-  hipX: 0.092,
-  thigh: 0.365,
-  shin: 0.345,
-  footLen: 0.225,
+  torsoLen: 0.45,
+  neckY: 0.45,
+  headR: 0.105,
+  // Narrower shoulders than hips are wide, a defined waist, and a slightly
+  // longer leg line. This ratio — not the palette, not the accessories — is
+  // what makes the figure read as a young woman at twenty metres; the previous
+  // spec inherited a 0.152 shoulder against a 0.092 hip and read as a slim man.
+  shoulderX: 0.132,
+  upperArm: 0.265,
+  foreArm: 0.245,
+  hipX: 0.108,
+  thigh: 0.375,
+  shin: 0.355,
+  footLen: 0.2,
+  chestW: 0.3,
+  waistW: 0.235,
+  pelvisW: 0.315,
 };
 
 export const ARIA_SPEC: CharacterSpec = {
@@ -140,6 +160,9 @@ const REN_PROPORTIONS: CharacterProportions = {
   thigh: 0.4,
   shin: 0.38,
   footLen: 0.25,
+  chestW: 0.38,
+  waistW: 0.355,
+  pelvisW: 0.32,
 };
 
 export const REN_SPEC: CharacterSpec = {
@@ -195,6 +218,9 @@ const VILLAGER_PROPORTIONS: CharacterProportions = {
   thigh: 0.34,
   shin: 0.32,
   footLen: 0.22,
+  chestW: 0.37,
+  waistW: 0.35,
+  pelvisW: 0.33,
 };
 
 interface VillagerLook {

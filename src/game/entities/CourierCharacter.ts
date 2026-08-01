@@ -365,12 +365,12 @@ export function buildCourier(spec: CharacterSpec = REN_SPEC): RenRig {
   hips.position.y = P.hipY;
   root.add(hips);
 
-  const pelvis = mesh(new THREE.BoxGeometry(0.32, 0.20, 0.21), PAL.pants, meshes);
+  const pelvis = mesh(new THREE.BoxGeometry(P.pelvisW, 0.20, 0.21), PAL.pants, meshes);
   pelvis.position.y = -0.04;
   hips.add(pelvis);
 
   // Utility belt — a strong horizontal read at the waist, as on the sheet.
-  const belt = mesh(new THREE.BoxGeometry(0.34, 0.07, 0.23), PAL.leather, meshes);
+  const belt = mesh(new THREE.BoxGeometry(P.pelvisW * 1.06, 0.07, 0.23), PAL.leather, meshes);
   belt.position.y = 0.07;
   hips.add(belt);
 
@@ -384,24 +384,53 @@ export function buildCourier(spec: CharacterSpec = REN_SPEC): RenRig {
   torso.position.y = 0.09;
   hips.add(torso);
 
-  const chest = mesh(new THREE.BoxGeometry(0.38, P.torsoLen, 0.24), PAL.shirt, meshes);
-  chest.position.y = P.torsoLen / 2 - 0.02;
+  // Torso in two tapered sections rather than one slab, so the figure has a
+  // waist. This is the single biggest lever on whether a low-poly humanoid
+  // reads as male or female, and it was previously a hardcoded 0.38 box that
+  // ignored the spec entirely.
+  const waistLen = P.torsoLen * 0.38;
+  const chestLen = P.torsoLen - waistLen;
+  const depth = P.chestW * 0.63;
+
+  const waist = mesh(
+    new THREE.BoxGeometry(P.waistW, waistLen, depth * 0.86),
+    PAL.shirt,
+    meshes,
+  );
+  waist.position.y = waistLen / 2 - 0.02;
+  torso.add(waist);
+
+  const chest = mesh(new THREE.BoxGeometry(P.chestW, chestLen, depth), PAL.shirt, meshes);
+  chest.position.y = waistLen + chestLen / 2 - 0.02;
   torso.add(chest);
 
   // The jacket is a second, slightly larger shell — that layered silhouette is
-  // the most recognisable thing about the design.
-  const jacket = mesh(new THREE.BoxGeometry(0.41, P.torsoLen * 0.82, 0.28), PAL.jacket, meshes);
-  jacket.position.y = P.torsoLen / 2 - 0.06;
+  // the most recognisable thing about the design. It follows the same taper,
+  // or it fills the waist back in and undoes the shape underneath.
+  const jacket = mesh(
+    new THREE.BoxGeometry(P.chestW * 1.08, P.torsoLen * 0.58, depth * 1.17),
+    PAL.jacket,
+    meshes,
+  );
+  jacket.position.y = waistLen + chestLen / 2 - 0.02;
   torso.add(jacket);
+
+  const jacketSkirt = mesh(
+    new THREE.BoxGeometry(P.waistW * 1.1, waistLen * 0.9, depth * 0.98),
+    PAL.jacket,
+    meshes,
+  );
+  jacketSkirt.position.y = waistLen * 0.5;
+  torso.add(jacketSkirt);
 
   // Quilting. On the sheet the jacket is a padded puffer read almost entirely
   // through its horizontal seam lines — without them the shell is just a box,
   // and the box is what made him look like a mech instead of a courier.
   for (const y of [0.10, 0.22, 0.34]) {
-    const quilt = mesh(new THREE.BoxGeometry(0.415, 0.030, 0.02), PAL.jacketDark, meshes);
+    const quilt = mesh(new THREE.BoxGeometry(P.chestW * 1.09, 0.030, 0.02), PAL.jacketDark, meshes);
     quilt.position.set(0, y, 0.135);
     torso.add(quilt);
-    const back = mesh(new THREE.BoxGeometry(0.415, 0.030, 0.02), PAL.jacketDark, meshes);
+    const back = mesh(new THREE.BoxGeometry(P.chestW * 1.09, 0.030, 0.02), PAL.jacketDark, meshes);
     back.position.set(0, y, -0.135);
     torso.add(back);
   }
