@@ -169,6 +169,33 @@ export class CourierAnimator implements LoadedCharacter {
     rig.forearmL.rotation.x = current.elbow;
     rig.forearmR.rotation.x = current.elbow;
 
+    // Relaxed stance while idle.
+    //
+    // A figure standing dead upright, weight even, both arms identical, reads
+    // as a mannequin on a stand however good the geometry is — the eye picks up
+    // the symmetry immediately. This is a small contrapposto: weight on one
+    // leg, hips tilted, the free knee softened, and the arms deliberately not
+    // matching. It is faded in by `settle` so it never fights a real animation.
+    // Every line here **assigns**. `hips.rotation.z` and `torso.rotation.z` are
+    // not written anywhere else in this method, so accumulating into them with
+    // `+=` added a fraction of a radian every frame and quietly rotated the
+    // whole character onto her side within a few seconds.
+    const settle = Math.max(0, 1 - Math.abs(current.stride) * 3);
+    rig.hips.rotation.z = 0.035 * settle;
+    rig.torso.rotation.z = -0.055 * settle;
+    if (settle > 0.01) {
+      // Free leg: slightly bent and turned out.
+      rig.legL.rotation.x -= 0.06 * settle;
+      rig.legL.rotation.z = 0.05 * settle;
+      rig.shinL.rotation.x += 0.16 * settle;
+      // Weight leg stays straight, planted a touch wider.
+      rig.legR.rotation.z = -0.03 * settle;
+      // Break the arm symmetry: one hangs, one rests nearer the hip.
+      rig.armL.rotation.z += 0.06 * settle;
+      rig.armR.rotation.z -= 0.02 * settle;
+      rig.forearmR.rotation.x -= 0.14 * settle;
+    }
+
     // Gliding spreads the arms wide rather than swinging them.
     if (this.clip === 'glide' || this.clip === 'glide_in') {
       rig.armL.rotation.z = damp(rig.armL.rotation.z, 1.25, rate, dt);

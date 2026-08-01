@@ -294,13 +294,28 @@ function buildLongHair(
     head.add(fringe);
   }
 
-  // Face-framing strands down past the jaw — the read that says "long hair"
-  // even from the front, where the back mass is invisible.
+  // Face-framing strands, parented to the **torso** so they hang past the
+  // shoulders instead of being clipped at the neck.
+  //
+  // These do most of the work. The back mass is invisible from the front, and
+  // the camera spends most of its time behind the player — so without a length
+  // of hair visible either side of the jaw, a long-haired character reads as
+  // having a short cap from every angle that matters.
   for (const side of [-1, 1]) {
-    const strand = mesh(new THREE.BoxGeometry(0.036, 0.20, 0.055), PAL.hair, meshes);
-    strand.position.set(side * (P.headR * 0.94), -0.055, 0.028);
-    strand.rotation.z = side * 0.05;
-    head.add(strand);
+    const front = mesh(
+      new THREE.BoxGeometry(0.05, 0.34, 0.075),
+      PAL.hair,
+      meshes,
+    );
+    front.position.set(side * (P.headR * 1.02), P.torsoLen * 0.86, P.headR * 0.28);
+    front.rotation.z = side * 0.06;
+    torso.add(front);
+
+    // A shorter inner strand against the neck, so the outer one does not read
+    // as a floating slab detached from the head.
+    const inner = mesh(new THREE.BoxGeometry(0.042, 0.15, 0.06), PAL.hair, meshes);
+    inner.position.set(side * (P.headR * 0.86), P.torsoLen * 0.98, P.headR * 0.1);
+    torso.add(inner);
   }
 
   // Back mass, on the torso: a tapered fall to mid-back.
@@ -572,25 +587,47 @@ export function buildCourier(spec: CharacterSpec = REN_SPEC): RenRig {
   // sheet you can see through the green tint, and that is the difference
   // between a person in glasses and a visor with two lamps in it.
   const FACE_Z = P.headR * 0.9;
+
+  // Every feature below is expressed as a fraction of head radius.
+  //
+  // They used to be absolute metres tuned against Ren's 0.113 m head. On a
+  // smaller head those same numbers put an oversized mouth barely under the
+  // nose, and it read unmistakably as a moustache. Face features have to scale
+  // with the skull or they land on the wrong part of it.
+  const F = P.headR / 0.113;
+
   for (const side of [-1, 1]) {
-    const eye = mesh(new THREE.SphereGeometry(0.0135, 8, 6), PAL.ink, meshes);
-    eye.scale.set(1.25, 1, 0.6);
-    eye.position.set(side * 0.043, 0.011, FACE_Z * 0.99);
+    const eye = mesh(new THREE.SphereGeometry(0.0145 * F, 8, 6), PAL.ink, meshes);
+    eye.scale.set(1.3, 1.05, 0.6);
+    eye.position.set(side * 0.042 * F, 0.014 * F, FACE_Z * 0.99);
     head.add(eye);
 
-    const brow = mesh(new THREE.BoxGeometry(0.040, 0.009, 0.014), PAL.hair, meshes);
-    brow.position.set(side * 0.045, 0.043, FACE_Z * 0.97);
-    // Angled down toward the nose — the sheet's expression is wry, not blank.
-    brow.rotation.z = side * -0.16;
+    const brow = mesh(
+      new THREE.BoxGeometry(0.038 * F, 0.008 * F, 0.014 * F),
+      PAL.hair,
+      meshes,
+    );
+    brow.position.set(side * 0.044 * F, 0.048 * F, FACE_Z * 0.97);
+    brow.rotation.z = side * -0.14;
     head.add(brow);
   }
 
-  const nose = mesh(new THREE.BoxGeometry(0.020, 0.030, 0.024), PAL.skin, meshes);
-  nose.position.set(0, -0.020, FACE_Z * 1.02);
+  const nose = mesh(
+    new THREE.BoxGeometry(0.017 * F, 0.024 * F, 0.021 * F),
+    PAL.skin,
+    meshes,
+  );
+  nose.position.set(0, -0.018 * F, FACE_Z * 1.02);
   head.add(nose);
 
-  const mouth = mesh(new THREE.BoxGeometry(0.030, 0.007, 0.012), PAL.ink, meshes);
-  mouth.position.set(0, -0.052, FACE_Z * 0.95);
+  // Small, set well below the nose, and softened away from pure ink — a hard
+  // dark bar directly under the nose is the moustache read, whatever its size.
+  const mouth = mesh(
+    new THREE.BoxGeometry(0.019 * F, 0.005 * F, 0.010 * F),
+    '#7d4a44',
+    meshes,
+  );
+  mouth.position.set(0, -0.070 * F, FACE_Z * 0.95);
   head.add(mouth);
 
   // ── glasses ─────────────────────────────────────────────────────────────
