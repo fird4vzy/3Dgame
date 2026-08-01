@@ -144,7 +144,12 @@ console.log('\njumping');
 await page.keyboard.press('Space');
 await page.waitForTimeout(200);
 const mid = await read();
-check('leaves the ground', !mid.grounded && mid.state === 'jumping', mid.state);
+// Assert she is *airborne*, not which half of the arc she is in. The apex is
+// at 367 ms (6.6 m/s against 18 m/s²), so a 200 ms sample is nominally still
+// rising — but any scheduling delay pushes it past the top and the state flips
+// to `falling`. Pinning the exact state made this fail about one run in three
+// while the behaviour under test was fine.
+check('leaves the ground', !mid.grounded && mid.state !== 'idle', mid.state);
 await page.waitForTimeout(1600);
 const landed = await read();
 check('lands again', landed.grounded, landed.state);
