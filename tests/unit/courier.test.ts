@@ -5,8 +5,8 @@ import {
   REN_HEIGHT,
   REN_PALETTE,
   PALETTE_LIFT,
-} from '../../src/game/entities/RenCharacter';
-import { RenAnimator } from '../../src/game/entities/RenAnimator';
+} from '../../src/game/entities/CourierCharacter';
+import { CourierAnimator } from '../../src/game/entities/CourierAnimator';
 
 describe('Ren rig', () => {
   it('stands the right height with feet at the origin', () => {
@@ -152,13 +152,13 @@ describe('Ren rig', () => {
 
 describe('Ren animation', () => {
   /** Advance the animator by `seconds` in 60 Hz steps. */
-  const run = (animator: RenAnimator, seconds: number) => {
+  const run = (animator: CourierAnimator, seconds: number) => {
     const dt = 1 / 60;
     for (let t = 0; t < seconds; t += dt) animator.update(dt);
   };
 
   it('cycles the legs while walking', () => {
-    const animator = new RenAnimator();
+    const animator = new CourierAnimator();
     animator.play('walk');
     run(animator, 0.6); // let the pose blend in
 
@@ -175,7 +175,7 @@ describe('Ren animation', () => {
   });
 
   it('swings the legs in opposition, not in unison', () => {
-    const animator = new RenAnimator();
+    const animator = new CourierAnimator();
     animator.play('run');
     run(animator, 1);
 
@@ -185,7 +185,7 @@ describe('Ren animation', () => {
   });
 
   it('swings arms opposite to the leg on the same side', () => {
-    const animator = new RenAnimator();
+    const animator = new CourierAnimator();
     animator.play('run');
     run(animator, 1);
 
@@ -194,7 +194,7 @@ describe('Ren animation', () => {
   });
 
   it('holds still when idle', () => {
-    const animator = new RenAnimator();
+    const animator = new CourierAnimator();
     animator.play('idle');
     run(animator, 1.5);
 
@@ -209,7 +209,7 @@ describe('Ren animation', () => {
 
   it('runs with a bigger stride than it walks', () => {
     const measure = (clip: 'walk' | 'run') => {
-      const animator = new RenAnimator();
+      const animator = new CourierAnimator();
       animator.play(clip);
       run(animator, 1);
       const rig = (animator as unknown as { rig: ReturnType<typeof buildRen> }).rig;
@@ -225,7 +225,7 @@ describe('Ren animation', () => {
 
   it('leans forward more when running than idling', () => {
     const lean = (clip: 'idle' | 'run') => {
-      const animator = new RenAnimator();
+      const animator = new CourierAnimator();
       animator.play(clip);
       run(animator, 1);
       return (animator as unknown as { rig: ReturnType<typeof buildRen> }).rig.torso.rotation.x;
@@ -234,7 +234,7 @@ describe('Ren animation', () => {
   });
 
   it('blends between poses rather than snapping', () => {
-    const animator = new RenAnimator();
+    const animator = new CourierAnimator();
     animator.play('idle');
     run(animator, 1);
     const rig = (animator as unknown as { rig: ReturnType<typeof buildRen> }).rig;
@@ -246,14 +246,14 @@ describe('Ren animation', () => {
   });
 
   it('resolves sockets by canonical name', () => {
-    const animator = new RenAnimator();
+    const animator = new CourierAnimator();
     expect(animator.getSocket('hand_R')).not.toBeNull();
     expect(animator.getSocket('back')).not.toBeNull();
     expect(animator.getSocket('nonsense')).toBeNull();
   });
 
   it('tints without driving the character to black', () => {
-    const animator = new RenAnimator();
+    const animator = new CourierAnimator();
     const rig = (animator as unknown as { rig: ReturnType<typeof buildRen> }).rig;
     const before = (rig.meshes[0]!.material as THREE.MeshToonMaterial).color.getHSL({ h: 0, s: 0, l: 0 });
 
@@ -265,7 +265,7 @@ describe('Ren animation', () => {
   });
 
   it('falls back to idle for a clip it has no pose for', () => {
-    const animator = new RenAnimator();
+    const animator = new CourierAnimator();
     expect(() => animator.play('emote_dance')).not.toThrow();
     animator.update(1 / 60);
   });

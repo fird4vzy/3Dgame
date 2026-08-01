@@ -36,6 +36,10 @@ import { ShardSystem } from '@game/systems/ShardSystem';
 import { ParticleSystem } from '@engine/vfx/ParticleSystem';
 import { buildDistrictProps, buildLighthouse } from '@game/entities/districtProps';
 import { Skydome, createStarfield } from '@game/world/Skydome';
+import type { MinimapMarker } from '@game/world/mapMarkers';
+import { buildCourier, type RenRig } from '@game/entities/CourierCharacter';
+import { VILLAGER_SPECS } from '@game/entities/characterSpec';
+import { Fireflies } from '@game/world/Fireflies';
 
 import { DISTRICTS, NPCS, npcById, type DistrictId, type ParcelWeight } from '../../data/content';
 
@@ -103,6 +107,11 @@ export class PlanetScene implements IScene {
   private stars: THREE.Points | null = null;
   private skyLevel = -1;
   private skydome!: Skydome;
+  /** Resident rigs, for the idle sway. */
+  private readonly villagerRigs: Array<{ rig: RenRig; phase: number }> = [];
+  private villagerSway = 0;
+  private fireflies!: Fireflies;
+  private readonly firefliesColour = new THREE.Color();
 
   private parcelVisual: { group: THREE.Group; glow: THREE.PointLight; core: THREE.Mesh } | null =
     null;
@@ -294,6 +303,8 @@ export class PlanetScene implements IScene {
     this.shards.update(dt, this.player.object3D.position);
     this.syncCharacterAnimation(dt);
     this.updateCharacterTint();
+    this.updateVillagers(dt);
+    this.updateFireflies(dt);
     this.updateParcelVisual(dt);
     this.updateLighthouse();
     this.updateSky();
@@ -326,6 +337,7 @@ export class PlanetScene implements IScene {
 
   dispose(): void {
     this.skydome.dispose();
+    this.fireflies.dispose();
     this.particles.dispose();
     this.character?.dispose();
     this.interaction.clear();
@@ -355,6 +367,38 @@ export class PlanetScene implements IScene {
     return null;
   }
 
+  /**
+   * Everything worth showing on the minimap.
+   *
+   * Rebuilt on demand rather than cached: it is a handful of entries, the scene
+   * is the only thing that knows what exists, and a cache would be one more
+   * thing to invalidate when a shard is collected or a contract advances.
+   */
+  get minimapMarkers(): MinimapMarker[] {
+    const markers: MinimapMarker[] = [];
+
+    const objective = this.objectiveTarget;
+    if (objective) markers.push({ position: objective.position, kind: 'objective' });
+
+    for (const [id, object] of this.npcObjects) {
+      // The objective already has its own, brighter marker.
+      if (objective && object.position.equals(objective.position)) continue;
+      markers.push({ position: object.position, kind: 'npc', label: id });
+    }
+
+    for (const shard of this.shards.uncollectedPositions()) {
+      markers.push({ position: shard, kind: 'shard' });
+    }
+
+    return markers;
+  }
+
+  /** 0–1 across the whole planet, for the minimap rim and the sky. */
+  get illuminationFraction(): number {
+    const total = this.districts.all.reduce((sum, d) => sum + d.light, 0);
+    return total / Math.max(1, this.districts.all.length);
+  }
+
   get cameraForward(): THREE.Vector3 {
     return this.renderer.camera.getWorldDirection(_camForward);
   }
@@ -369,6 +413,9 @@ export class PlanetScene implements IScene {
 
     this.skydome = new Skydome();
     scene.add(this.skydome.mesh);
+
+    this.fireflies = new Fireflies();
+    scene.add(this.fireflies.mesh);
 
     scene.add(this.terrain.mesh);
     scene.add(this.terrain.water);
@@ -514,7 +561,23 @@ export class PlanetScene implements IScene {
   private buildCast(): void {
     for (const npc of NPCS) {
       const position = surfacePoint(npc.at, 0.05);
-      const body = createVillager(npc.colour);
+
+      // Residents are built from the same rig as the player. They were capsules
+      // with a cone for a nose, which made "the people" the least convincing
+      // thing in a game entirely about visiting people.
+      const spec = VILLAGER_SPECS[npc.id];
+      const body = new THREE.Group();
+      body.name = 'villager';
+      if (spec) {
+        const rig = buildCourier(spec);
+        rig.root.position.y = 0;
+        body.add(rig.root);
+        // A slow idle sway, seeded per person so they are not synchronised.
+        this.villagerRigs.push({ rig, phase: Math.random() * Math.PI * 2 });
+      } else {
+        body.add(createVillager(npc.colour));
+      }
+
       body.position.copy(position);
       body.quaternion.copy(surfaceQuaternion(position, Math.PI));
 
@@ -843,6 +906,40 @@ export class PlanetScene implements IScene {
    * the district's illumination also makes the courier visibly warm up as the
    * planet lights, which serves the core hook rather than fighting it.
    */
+  /**
+   * A slow breathing sway on every resident.
+   *
+   * Perfectly still humanoids read as mannequins — worse than the capsules did,
+   * because a person-shaped thing that never moves is uncanny in a way an
+   * abstract shape is not. Two sine waves each is enough, and costs nothing.
+   */
+  private updateVillagers(dt: number): void {
+    this.villagerSway += dt;
+    for (const { rig, phase } of this.villagerRigs) {
+      const t = this.villagerSway + phase;
+      rig.torso.rotation.z = Math.sin(t * 0.7) * 0.022;
+      rig.torso.position.y = Math.sin(t * 1.4) * 0.006;
+      // An occasional glance around, so they seem to be waiting rather than
+      // switched off.
+      rig.head.rotation.y = Math.sin(t * 0.42) * 0.22;
+      rig.armL.rotation.x = Math.sin(t * 0.7) * 0.05;
+      rig.armR.rotation.x = -Math.sin(t * 0.7) * 0.05;
+    }
+  }
+
+  /** Motes follow the player, and multiply as the district around them wakes. */
+  private updateFireflies(dt: number): void {
+    const runtime = this.districts.at(this.player.object3D.position);
+    this.firefliesColour.set(runtime.def.litColour);
+    this.fireflies.update(
+      dt,
+      this.controller.smoothedPosition,
+      this.renderer.camera,
+      runtime.light,
+      this.firefliesColour,
+    );
+  }
+
   private updateCharacterTint(): void {
     if (!this.character?.setTint) return;
     const runtime = this.districts.at(this.player.object3D.position);

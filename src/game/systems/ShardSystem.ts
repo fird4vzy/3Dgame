@@ -81,6 +81,15 @@ export class ShardSystem {
     }
   }
 
+  /** Positions of shards still out there, for the minimap. */
+  uncollectedPositions(): THREE.Vector3[] {
+    const out: THREE.Vector3[] = [];
+    for (const shard of this.shards.values()) {
+      if (!shard.collected) out.push(shard.position);
+    }
+    return out;
+  }
+
   get collectedIds(): string[] {
     return [...this.shards.values()].filter((s) => s.collected).map((s) => s.id);
   }

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { LoadedCharacter } from '@engine/character/CharacterFactory';
 import type { CharacterDefinition, ClipName } from '@engine/character/CharacterDefinition';
-import { buildRen, REN_HEIGHT, REN_HIP_Y, type RenRig } from './RenCharacter';
+import { buildCourier, courierHipY, type RenRig } from './CourierCharacter';
+import { ARIA_SPEC, type CharacterSpec } from './characterSpec';
 
 /**
  * Procedural animation for Ren's rig.
@@ -81,7 +82,7 @@ const _up = new THREE.Vector3();
 const _tint = new THREE.Color();
 const WHITE = new THREE.Color('#ffffff');
 
-export class RenAnimator implements LoadedCharacter {
+export class CourierAnimator implements LoadedCharacter {
   readonly definition: CharacterDefinition;
   readonly object3D: THREE.Object3D;
 
@@ -101,8 +102,12 @@ export class RenAnimator implements LoadedCharacter {
   private lookTarget = 0;
   private lookCurrent = 0;
 
-  constructor() {
-    this.rig = buildRen();
+  /** Hip height for *this* spec — a shared constant put short characters underground. */
+  private readonly hipY: number;
+
+  constructor(spec: CharacterSpec = ARIA_SPEC) {
+    this.rig = buildCourier(spec);
+    this.hipY = courierHipY(spec);
     this.object3D = this.rig.root;
 
     for (const m of this.rig.meshes) {
@@ -111,10 +116,10 @@ export class RenAnimator implements LoadedCharacter {
     }
 
     this.definition = {
-      id: 'ren_cypher_3d',
-      displayName: "Ren 'Cypher' Kairo",
-      height: REN_HEIGHT,
-      source: { kind: 'gltf', url: 'procedural://ren' },
+      id: `${spec.id}_3d`,
+      displayName: spec.displayName,
+      height: spec.height,
+      source: { kind: 'gltf', url: `procedural://${spec.id}` },
       notes: {
         origin: 'Procedurally rigged from the concept sheet specification.',
         animation: 'Locomotion is generated, not keyframed — so it cycles.',
@@ -178,7 +183,7 @@ export class RenAnimator implements LoadedCharacter {
     }
 
     // Hips bob at twice the stride rate — one dip per footfall, not per cycle.
-    rig.hips.position.y = REN_HIP_Y - Math.abs(Math.cos(this.phase)) * current.bob;
+    rig.hips.position.y = this.hipY - Math.abs(Math.cos(this.phase)) * current.bob;
     rig.hips.rotation.y = swing * current.legSwing * 0.12;
 
     // Torso leans into speed and counter-rotates against the hips.

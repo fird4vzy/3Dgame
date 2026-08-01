@@ -152,6 +152,7 @@ async function bootstrap(): Promise<void> {
       dialogueOverlay.update(dt);
       const objective = scene.objectiveTarget;
       hud.setTarget(objective?.position ?? null, objective?.hint);
+      hud.setMinimapData(scene.minimapMarkers, scene.illuminationFraction);
       hud.update(dt, scene.player.object3D.position, scene.cameraForward);
       soundBoard.updateListener(renderer.camera);
       ui.update(dt);
@@ -329,8 +330,8 @@ async function attachCharacter(scene: PlanetScene): Promise<void> {
     // a sphere — the character has to have a back, cast a shadow, and turn —
     // and a procedural rig also gives locomotion that actually cycles, which no
     // amount of sprite work could have done with one drawing per action.
-    const { RenAnimator } = await import('@game/entities/RenAnimator');
-    scene.setCharacter(new RenAnimator());
+    const { CourierAnimator } = await import('@game/entities/CourierAnimator');
+    scene.setCharacter(new CourierAnimator());
   } catch (error) {
     console.warn('[Character] falling back to the placeholder rig', error);
   }

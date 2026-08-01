@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { EventBus } from '@core/events/EventBus';
 import { walkingDistance } from '@game/world/placement';
+import { Minimap } from './Minimap';
+import type { MinimapMarker } from '@game/world/mapMarkers';
 
 const _toTarget = new THREE.Vector3();
 const _up = new THREE.Vector3();
@@ -8,13 +10,22 @@ const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
 
 /**
- * The in-game HUD — deliberately sparse (docs/10-ui-flow.md §10.2).
+ * The in-game HUD — sparse, but no longer *only* a compass.
  *
- * The compass gives **direction only**, never a map. On a planet whose horizon
- * is 13.5 m away the next landmark crests into view as you approach, so a map
- * screen would replace the game's best trick with a chore (Pillar 3).
+ * The original design said direction-only and never a map, on the reasoning
+ * that a 13.5 m horizon means landmarks crest into view as you approach. In
+ * play that turned out to be half right: it works beautifully for the last
+ * twenty metres and not at all for the first two hundred, and players reported
+ * losing time hunting for recipients. So there is now a {@link Minimap} —
+ * a dial, not a map screen, and it shows where things *are* without telling you
+ * how to get there. Playtest beats pillar.
  */
 export class Hud {
+  private readonly minimap: Minimap;
+  /** Markers supplied by the scene each frame; empty until it feeds us. */
+  private markers: readonly MinimapMarker[] = [];
+  private litFraction = 0;
+
   private readonly root: HTMLElement;
   private readonly compass: HTMLElement;
   private readonly compassNeedle: HTMLElement;
@@ -136,6 +147,7 @@ export class Hud {
       ].join(';'),
     );
 
+    this.minimap = new Minimap(this.root);
     this.root.append(this.compass, this.card, this.prompt, this.parcel, this.district);
     parent.appendChild(this.root);
 
@@ -202,11 +214,21 @@ export class Hud {
     this.root.style.display = visible ? '' : 'none';
   }
 
+  /** Feed the minimap. Called by the scene, which owns what is out there. */
+  setMinimapData(markers: readonly MinimapMarker[], litFraction: number): void {
+    this.markers = markers;
+    this.litFraction = litFraction;
+  }
+
   update(dt: number, playerPosition: THREE.Vector3, cameraForward: THREE.Vector3): void {
     if (this.districtTimer > 0) {
       this.districtTimer -= dt;
       if (this.districtTimer <= 0) this.district.style.opacity = '0';
     }
+
+    // Drawn every frame regardless of whether there is an objective: knowing
+    // what is around you is the point, not just where you are headed.
+    this.minimap.update(playerPosition, cameraForward, this.markers, this.litFraction);
 
     if (!this.target) return;
 
@@ -230,6 +252,7 @@ export class Hud {
   }
 
   dispose(): void {
+    this.minimap.dispose();
     this.root.remove();
   }
 
