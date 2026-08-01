@@ -287,7 +287,11 @@ export class PlanetScene implements IScene {
 
     if (modelHeight && modelHeight > 0.1) {
       const scale = PLAYER_HEIGHT / modelHeight;
-      character.object3D.scale.setScalar(scale);
+      // Only rescale when it actually matters. VRM springbone physics is
+      // simulated in world space and misbehaves under a scaled ancestor — the
+      // hair fans out into spikes — and a model within ~12% of the target is
+      // close enough that correcting it costs far more than it buys.
+      if (Math.abs(1 - scale) > 0.12) character.object3D.scale.setScalar(scale);
     }
 
     this.player.object3D.add(character.object3D);

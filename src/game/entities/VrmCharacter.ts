@@ -219,8 +219,23 @@ export class VrmCharacter implements LoadedCharacter {
     this.poseAirborne(dt);
     this.updateFace(dt);
 
-    // Springbones (hair, skirt) and eye look-at.
-    this.vrm.update(dt);
+    // Everything the VRM needs, **except** springbones.
+    //
+    // Springbone physics assumes a world with one fixed "down" and a character
+    // whose root does not rotate much. This game breaks both: down is toward
+    // the planet centre and changes continuously, and the root is re-oriented
+    // to the surface normal every frame. The simulation reads that as violent
+    // motion and answers by flinging every hair strand outward into a spiked
+    // crown. Re-pointing gravity per joint and giving them a `center` improved
+    // it but did not fix it.
+    //
+    // So the hair sits in its authored rest pose instead. Static hair that
+    // hangs correctly beats dynamic hair that looks broken, and this is the
+    // honest trade until the springbone solver can be run in the character's
+    // local frame properly.
+    this.vrm.humanoid?.update();
+    this.vrm.expressionManager?.update();
+    this.vrm.lookAt?.update(dt);
   }
 
   /**
@@ -238,7 +253,7 @@ export class VrmCharacter implements LoadedCharacter {
     ): void => {
       const thigh = s * c.legSwing;
       // Knee bends only on the backswing, so the foot clears the ground.
-      const knee = Math.max(0, -s) * c.legSwing * 1.5;
+      const knee = Math.max(0, -s) * c.legSwing * 0.95;
 
       this.rotate(`${side}UpperLeg` as BoneName, S * thigh, 0, 0);
       this.rotate(`${side}LowerLeg` as BoneName, S * knee, 0, 0);
