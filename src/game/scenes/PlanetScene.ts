@@ -8,7 +8,7 @@ import type { RendererService } from '@engine/render/RendererService';
 import type { MusicDirector } from '@engine/audio/MusicDirector';
 import type { IScene } from '@engine/scene/IScene';
 import type { LoadedCharacter } from '@engine/character/CharacterFactory';
-import { shouldBeVisible } from '@core/math/spherical';
+import { shouldBeVisible, horizonDistance } from '@core/math/spherical';
 import { PLANET_RADIUS, PLAYER_HEIGHT } from '@config/constants';
 
 import { PlanetTerrain } from '@game/world/PlanetTerrain';
@@ -60,6 +60,8 @@ const DUST_COLOUR = new THREE.Color('#b9ae94');
 /** Matches the shard mesh's emissive, so the burst reads as the shard itself. */
 const SHARD_COLOUR = new THREE.Color('#f6bd60');
 const _skyUp = new THREE.Vector3();
+const _fillRight = new THREE.Vector3();
+const _lightAnchor = new THREE.Vector3();
 
 export interface PlanetSceneCallbacks {
   onDistrictChanged?(id: DistrictId, displayName: string): void;
@@ -105,6 +107,9 @@ export class PlanetScene implements IScene {
   private readonly cameraOccluders: THREE.Object3D[] = [];
   private sun!: THREE.DirectionalLight;
   private ambient!: THREE.HemisphereLight;
+  /** Short-range lights that follow the player, so she reads in the dark. */
+  private characterFill!: THREE.PointLight;
+  private characterRim!: THREE.PointLight;
   private lighthouse: { lamp: THREE.Mesh; light: THREE.PointLight } | null = null;
   private stars: THREE.Points | null = null;
   private skyLevel = -1;
@@ -430,7 +435,18 @@ export class PlanetScene implements IScene {
     const scene = this.world.scene;
     // No flat clear colour: the dome's gradient follows the player's local up,
     // which a fixed background cannot do on a planet you can walk right around.
-    scene.fog = new THREE.Fog('#1b2033', 40, 190);
+    // Fog range is set from the planet, not picked by eye.
+    //
+    // This was `Fog(40, 190)` — numbers that belong to a flat world. On a
+    // 60 m sphere the horizon from eye height is `sqrt(2Rh)` ≈ 13.9 m, so
+    // *nothing in view was ever far enough away to be fogged at all* and the
+    // terrain cut against the sky at a razor edge with no depth whatsoever.
+    // That single mismatch is most of why the world looked flat.
+    //
+    // Deriving it from `horizonDistance` also means it stays correct if the
+    // planet is ever resized.
+    const horizon = horizonDistance(PLANET_RADIUS, PLAYER_HEIGHT);
+    scene.fog = new THREE.Fog('#1b2033', horizon * 1.1, horizon * 5.5);
 
     this.skydome = new Skydome();
     scene.add(this.skydome.mesh);
@@ -466,6 +482,26 @@ export class PlanetScene implements IScene {
       this.sun.shadow.bias = -0.0004;
       this.sun.shadow.normalBias = 0.06;
     }
+    // A key light that belongs to the character, not to the world.
+    //
+    // The premise puts the player in an unlit district for the whole opening,
+    // and the honest consequence was that she rendered as a black silhouette
+    // with two pale arms — a dark-haired figure in dark clothes under a
+    // hemisphere light is simply not readable. Raising the ambient instead
+    // would have flattened the entire planet and thrown away the "light is
+    // returning" hook, so this is local: a short-range, cool fill that rides
+    // above and behind the camera and reaches almost nothing else.
+    //
+    // Every third-person game does this. It is not cheating; it is the reason
+    // you can see the protagonist at night.
+    this.characterFill = new THREE.PointLight(0xa8bce8, 2.1, 4.5, 2);
+    scene.add(this.characterFill);
+
+    // ...and a warm rim from the opposite side, which is what separates her
+    // from the background rather than merely brightening her.
+    this.characterRim = new THREE.PointLight(0xffd2a0, 1.3, 4.0, 2);
+    scene.add(this.characterRim);
+
     scene.add(this.sun, this.sun.target);
   }
 
@@ -836,11 +872,15 @@ export class PlanetScene implements IScene {
 
     const fog = this.world.scene.fog as THREE.Fog | null;
     if (fog) {
-      // Fog must match the horizon band, or the terrain edge cuts against it.
-      this.skydome.horizonColour(fog.color, fraction);
+      // Fog must match the horizon band, or the terrain edge cuts against it
+      // — but against the horizon *as drawn*, which the dome darkens as it
+      // approaches the ground. Matching the raw uniform instead washes the
+      // whole surface out to a flat pale sheet, which is what it did.
+      this.skydome.horizonColour(fog.color, fraction).multiplyScalar(0.62);
       // Visibility opens up as the world lights: dusk hides the far side.
-      fog.near = 40 + fraction * 30;
-      fog.far = 190 + fraction * 90;
+      const horizon = horizonDistance(PLANET_RADIUS, PLAYER_HEIGHT);
+      fog.near = horizon * (1.1 + fraction * 0.5);
+      fog.far = horizon * (5.5 + fraction * 2.5);
     }
 
     if (this.stars) {
@@ -1025,6 +1065,26 @@ export class PlanetScene implements IScene {
     this.sun.position.copy(position).addScaledVector(_sunDir, 70);
     this.sun.target.position.copy(position);
     this.sun.target.updateMatrixWorld();
+
+    // Character lights ride with the camera, so she is lit from the side the
+    // player is looking from however the camera is orbited. Both sit close to
+    // her — their range is metres, not tens of metres, so the terrain and the
+    // props around her stay as dark as the district's own illumination says.
+    this.renderer.camera.getWorldDirection(_camForward);
+    _fillRight.copy(_sunUp).cross(_camForward).normalize();
+    const chest = _lightAnchor.copy(position).addScaledVector(_sunUp, PLAYER_HEIGHT * 0.75);
+
+    this.characterFill.position
+      .copy(chest)
+      .addScaledVector(_camForward, -1.6)
+      .addScaledVector(_fillRight, 1.5)
+      .addScaledVector(_sunUp, 1.2);
+
+    this.characterRim.position
+      .copy(chest)
+      .addScaledVector(_camForward, 1.5)
+      .addScaledVector(_fillRight, -1.6)
+      .addScaledVector(_sunUp, 1.0);
   }
 
   private addStars(scene: THREE.Scene): void {

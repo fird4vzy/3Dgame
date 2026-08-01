@@ -33,9 +33,18 @@ export class Skydome {
         uUp: { value: new THREE.Vector3(0, 1, 0) },
         uIllumination: { value: 0 },
         // Dusk palette — the planet as the player finds it.
-        uZenithDark: { value: new THREE.Color('#0c0f1e') },
-        uHorizonDark: { value: new THREE.Color('#222a45') },
-        uGlowDark: { value: new THREE.Color('#3b3455') },
+        //
+        // Deliberately *not* as dark as it was. A near-black sky is a literal
+        // reading of "unlit world" that costs you the world: with nothing in
+        // the sky, the terrain has no silhouette to sit against, the horizon
+        // vanishes, and the opening half hour is a black rectangle with a
+        // character in it. Deep blue twilight still reads as "the light has
+        // gone" while leaving the planet legible — and it makes the amber of
+        // the first lit district land against a complement rather than against
+        // nothing.
+        uZenithDark: { value: new THREE.Color('#141b33') },
+        uHorizonDark: { value: new THREE.Color('#38466f') },
+        uGlowDark: { value: new THREE.Color('#6a5a7d') },
         // Restored palette — a warm evening, not a blue afternoon.
         uZenithLit: { value: new THREE.Color('#2b2a52') },
         uHorizonLit: { value: new THREE.Color('#6d5a7d') },
@@ -78,8 +87,8 @@ export class Skydome {
 
           // A warm band hugging the horizon, tightest and brightest once the
           // planet is lit. This is what reads as atmosphere.
-          float band = exp(-abs(height) * 7.0);
-          colour += glow * band * (0.25 + uIllumination * 0.75);
+          float band = exp(-abs(height) * 5.5);
+          colour += glow * band * (0.45 + uIllumination * 0.75);
 
           // Below the horizon the dome is mostly hidden by the planet, but a
           // sliver shows from hilltops; keep it dark so it reads as ground.
