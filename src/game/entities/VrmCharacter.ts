@@ -127,19 +127,25 @@ export class VrmCharacter implements LoadedCharacter {
 
       // VRM 0.0 faces -Z; the rest of the game faces +Z.
       VRMUtils.rotateVRM0(vrm);
-      // Drops unused morphs, joints and duplicate materials. On a 16 MB VRoid
-      // export this is not cosmetic — it is most of the runtime cost.
-      VRMUtils.combineSkeletons(vrm.scene);
-      VRMUtils.removeUnnecessaryVertices(vrm.scene);
+
+      // Only the safe optimisation. `combineSkeletons` and
+      // `removeUnnecessaryVertices` rewrite skinning data, and on this export
+      // they shredded the arms — trailing streaks of stretched geometry
+      // following the hands. Unused morph targets are the bulk of a VRoid
+      // file's runtime cost anyway, and dropping them touches no skin weights.
       VRMUtils.combineMorphs(vrm);
 
       vrm.scene.traverse((object) => {
         const mesh = object as THREE.Mesh;
         if (!mesh.isMesh) return;
-        mesh.castShadow = true;
+        // A VRoid body is tens of thousands of triangles. Putting it in the
+        // shadow pass as well as the main pass roughly doubles its cost for a
+        // silhouette on the ground nobody looks at, and it was most of the
+        // stutter. It still *receives* shadows.
+        mesh.castShadow = false;
         mesh.receiveShadow = true;
-        // VRoid meshes carry generous bounding spheres; without this they pop
-        // out at the screen edge when the camera swings.
+        // Skinned bounds go stale as bones move; without this she vanishes at
+        // the screen edge mid-stride.
         mesh.frustumCulled = false;
       });
 
@@ -183,10 +189,17 @@ export class VrmCharacter implements LoadedCharacter {
 
     // Legs: opposed swing, knee bending only on the backswing so the foot
     // clears the ground rather than scything through it.
-    this.rotate('leftUpperLeg', swing * c.legSwing, 0, 0);
-    this.rotate('rightUpperLeg', opposite * c.legSwing, 0, 0);
-    this.rotate('leftLowerLeg', Math.max(0, -swing) * c.legSwing * 1.5, 0, 0);
-    this.rotate('rightLowerLeg', Math.max(0, -opposite) * c.legSwing * 1.5, 0, 0);
+    //
+    // Every X rotation is negated relative to the procedural rig. `rotateVRM0`
+    // turns the scene to face +Z, but the normalized bone space it wraps still
+    // has forward at -Z, so a pitch that swings a limb forward on our own rig
+    // swings it backward here. Unnegated, the knees hinged the wrong way and
+    // she walked like an ostrich — and jumped with her arms behind her.
+    const S = -1;
+    this.rotate('leftUpperLeg', S * swing * c.legSwing, 0, 0);
+    this.rotate('rightUpperLeg', S * opposite * c.legSwing, 0, 0);
+    this.rotate('leftLowerLeg', S * Math.max(0, -swing) * c.legSwing * 1.5, 0, 0);
+    this.rotate('rightLowerLeg', S * Math.max(0, -opposite) * c.legSwing * 1.5, 0, 0);
 
     // Arms counter-swing, from a *lowered* rest.
     //
@@ -199,20 +212,20 @@ export class VrmCharacter implements LoadedCharacter {
     // the opposite sign raises them into a victory pose.)
     const ARM_DOWN = 1.25;
     const armIn = 0.12;
-    this.rotate('leftUpperArm', opposite * c.armSwing + c.shoulder, 0, ARM_DOWN + armIn);
-    this.rotate('rightUpperArm', swing * c.armSwing + c.shoulder, 0, -ARM_DOWN - armIn);
-    this.rotate('leftLowerArm', c.elbow, 0, 0);
-    this.rotate('rightLowerArm', c.elbow, 0, 0);
+    this.rotate('leftUpperArm', S * (opposite * c.armSwing + c.shoulder), 0, ARM_DOWN + armIn);
+    this.rotate('rightUpperArm', S * (swing * c.armSwing + c.shoulder), 0, -ARM_DOWN - armIn);
+    this.rotate('leftLowerArm', S * c.elbow, 0, 0);
+    this.rotate('rightLowerArm', S * c.elbow, 0, 0);
 
     // Carrying holds the right arm forward, cradling the parcel.
     if (this.carrying) {
-      this.rotate('rightUpperArm', -1.0, 0, -ARM_DOWN * 0.75);
-      this.rotate('rightLowerArm', -0.8, 0, 0);
+      this.rotate('rightUpperArm', S * -1.0, 0, -ARM_DOWN * 0.75);
+      this.rotate('rightLowerArm', S * -0.8, 0, 0);
     }
 
     // Lean into speed, and bob at twice the stride rate.
-    this.rotate('chest', c.lean, 0, 0);
-    this.rotate('spine', c.lean * 0.4, 0, 0);
+    this.rotate('chest', S * c.lean, 0, 0);
+    this.rotate('spine', S * c.lean * 0.4, 0, 0);
 
     const hips = this.bones.get('hips');
     if (hips) hips.position.y = this.hipRestY + Math.abs(Math.cos(this.phase)) * c.bob;
