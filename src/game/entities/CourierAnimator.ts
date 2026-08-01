@@ -18,7 +18,7 @@ import { ARIA_SPEC, type CharacterSpec } from './characterSpec';
  * rotation in radians; `damp` does the smoothing frame-rate independently.
  */
 
-type Pose = {
+export type Pose = {
   /** Stride frequency in cycles per second. 0 disables limb swing. */
   stride: number;
   /** Peak leg swing, radians. */
@@ -35,7 +35,7 @@ type Pose = {
   shoulder: number;
 };
 
-const POSES: Record<string, Pose> = {
+export const POSES: Record<string, Pose> = {
   idle:   { stride: 0,    legSwing: 0,    armSwing: 0,    elbow: -0.18, lean: 0.02, bob: 0.006, shoulder: 0.06 },
   walk:   { stride: 0.92, legSwing: 0.52, armSwing: 0.42, elbow: -0.30, lean: 0.06, bob: 0.022, shoulder: 0 },
   run:    { stride: 1.45, legSwing: 0.86, armSwing: 0.78, elbow: -0.85, lean: 0.22, bob: 0.045, shoulder: 0 },
@@ -49,7 +49,7 @@ const POSES: Record<string, Pose> = {
 };
 
 /** Canonical clip → pose. Unknown clips fall back to idle. */
-const CLIP_POSE: Partial<Record<ClipName, keyof typeof POSES>> = {
+export const CLIP_POSE: Partial<Record<ClipName, keyof typeof POSES>> = {
   idle: 'idle',
   idle_look: 'idle',
   walk: 'walk',

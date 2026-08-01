@@ -324,12 +324,24 @@ function applyAudioSettings(audio: AudioManager, settings: SettingsManager): voi
  * game remains playable, which is the whole reason the placeholder exists.
  */
 async function attachCharacter(scene: PlanetScene): Promise<void> {
+  // Prefer an authored VRM if one is present. VRoid exports no animation clips,
+  // but this game generates locomotion from pose tables rather than sampling
+  // them — and VRM guarantees a named humanoid skeleton — so an authored model
+  // walks, runs and carries with no animation data in the file at all.
   try {
-    // Ren is a real 3D rig, procedurally assembled from the concept sheet's
-    // specification. A billboard was never right for a game whose camera orbits
-    // a sphere — the character has to have a back, cast a shadow, and turn —
-    // and a procedural rig also gives locomotion that actually cycles, which no
-    // amount of sprite work could have done with one drawing per action.
+    const { VrmCharacter } = await import('@game/entities/VrmCharacter');
+    const vrm = await VrmCharacter.load(`${import.meta.env.BASE_URL}assets/characters/aria.vrm`);
+    if (vrm) {
+      scene.setCharacter(vrm, vrm.height);
+      return;
+    }
+  } catch (error) {
+    console.warn('[Character] VRM unavailable; using the procedural rig', error);
+  }
+
+  try {
+    // The procedural fallback: a real 3D rig assembled from the concept sheet's
+    // specification. Still the right answer when no authored model is supplied.
     const { CourierAnimator } = await import('@game/entities/CourierAnimator');
     scene.setCharacter(new CourierAnimator());
   } catch (error) {

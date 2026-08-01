@@ -9,7 +9,7 @@ import type { MusicDirector } from '@engine/audio/MusicDirector';
 import type { IScene } from '@engine/scene/IScene';
 import type { LoadedCharacter } from '@engine/character/CharacterFactory';
 import { shouldBeVisible } from '@core/math/spherical';
-import { PLANET_RADIUS } from '@config/constants';
+import { PLANET_RADIUS, PLAYER_HEIGHT } from '@config/constants';
 
 import { PlanetTerrain } from '@game/world/PlanetTerrain';
 import { DistrictRegistry } from '@game/world/DistrictRegistry';
@@ -269,12 +269,27 @@ export class PlanetScene implements IScene {
     return this.districts.at(this.player.object3D.position).def.id;
   }
 
-  setCharacter(character: LoadedCharacter): void {
+  /**
+   * Swap in a character model.
+   *
+   * `modelHeight` scales it to the gameplay height. An authored model is
+   * whatever height its author made it — a VRoid export is typically well over
+   * 1.6 m — and the collision capsule, camera arm and interaction radii are all
+   * tuned against a fixed figure, so the model is fitted to the game rather
+   * than the game re-tuned around the model.
+   */
+  setCharacter(character: LoadedCharacter, modelHeight?: number): void {
     this.character?.dispose();
     this.character = character;
     for (const child of [...this.player.object3D.children]) {
       if (child !== this.parcelVisual?.group) this.player.object3D.remove(child);
     }
+
+    if (modelHeight && modelHeight > 0.1) {
+      const scale = PLAYER_HEIGHT / modelHeight;
+      character.object3D.scale.setScalar(scale);
+    }
+
     this.player.object3D.add(character.object3D);
     character.play('idle');
   }
