@@ -171,25 +171,24 @@ export class CourierAnimator implements LoadedCharacter {
 
     // Relaxed stance while idle.
     //
-    // A figure standing dead upright, weight even, both arms identical, reads
-    // as a mannequin on a stand however good the geometry is — the eye picks up
-    // the symmetry immediately. This is a small contrapposto: weight on one
-    // leg, hips tilted, the free knee softened, and the arms deliberately not
-    // matching. It is faded in by `settle` so it never fights a real animation.
-    // Every line here **assigns**. `hips.rotation.z` and `torso.rotation.z` are
-    // not written anywhere else in this method, so accumulating into them with
-    // `+=` added a fraction of a radian every frame and quietly rotated the
-    // whole character onto her side within a few seconds.
+    // A figure standing dead upright with both arms identical reads as a
+    // mannequin on a stand however good the geometry is. This is a small
+    // contrapposto, faded out by `settle` the moment she moves.
+    //
+    // **The tilt goes in the torso, never the hips.** The legs are children of
+    // the hips, so rotating those leans the whole body — feet and all — off
+    // vertical, and the character visibly stands at an angle to the ground.
+    // Real contrapposto keeps the weight leg plumb and tilts what is above it.
+    // Every line assigns rather than accumulates, because nothing else in this
+    // method resets these channels.
     const settle = Math.max(0, 1 - Math.abs(current.stride) * 3);
-    rig.hips.rotation.z = 0.035 * settle;
-    rig.torso.rotation.z = -0.055 * settle;
+    rig.hips.rotation.z = 0;
+    rig.torso.rotation.z = -0.045 * settle;
     if (settle > 0.01) {
-      // Free leg: slightly bent and turned out.
-      rig.legL.rotation.x -= 0.06 * settle;
-      rig.legL.rotation.z = 0.05 * settle;
-      rig.shinL.rotation.x += 0.16 * settle;
-      // Weight leg stays straight, planted a touch wider.
-      rig.legR.rotation.z = -0.03 * settle;
+      // Free leg: softened knee only. No z-rotation — that splays the foot and
+      // lifts one sole off the ground.
+      rig.legL.rotation.x -= 0.05 * settle;
+      rig.shinL.rotation.x += 0.14 * settle;
       // Break the arm symmetry: one hangs, one rests nearer the hip.
       rig.armL.rotation.z += 0.06 * settle;
       rig.armR.rotation.z -= 0.02 * settle;

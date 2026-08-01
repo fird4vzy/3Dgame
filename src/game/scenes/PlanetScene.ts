@@ -35,6 +35,7 @@ import { DeliverySystem } from '@game/systems/DeliverySystem';
 import { ShardSystem } from '@game/systems/ShardSystem';
 import { ParticleSystem } from '@engine/vfx/ParticleSystem';
 import { buildDistrictProps, buildLighthouse } from '@game/entities/districtProps';
+import { buildGroundCover } from '@game/entities/groundCover';
 import { Skydome, createStarfield } from '@game/world/Skydome';
 import type { MinimapMarker } from '@game/world/mapMarkers';
 import { buildCourier, type RenRig } from '@game/entities/CourierCharacter';
@@ -531,6 +532,23 @@ export class PlanetScene implements IScene {
         this.world.scene.add(mesh);
         // Scenery has to block the camera, or it parks inside a rock.
         this.cameraOccluders.push(mesh);
+      }
+
+      // Ground cover: flowers, grass, mushrooms, pebbles. The world had trees
+      // and lamps and bare ground between them, which reads as empty however
+      // good the sky is. Dense on purpose — it is instanced, unshadowed, and
+      // costs nothing per frame.
+      // A district covers roughly 4,000 m² of surface, so a couple of hundred
+      // plants is one every twenty metres — invisible. This is the density that
+      // actually reads as ground cover when you are standing in it.
+      const coverSpots = scatterAround(
+        centre,
+        1000,
+        def.radius * 0.8,
+        def.id.length * 1231 + 3,
+      );
+      for (const mesh of buildGroundCover(def.id, coverSpots, def.id.length * 787)) {
+        this.world.scene.add(mesh);
       }
     }
 
