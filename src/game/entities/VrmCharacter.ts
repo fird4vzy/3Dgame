@@ -8,58 +8,60 @@ import { POSES, CLIP_POSE, type Pose } from './CourierAnimator';
 const damp = (a: number, b: number, rate: number, dt: number): number =>
   a + (b - a) * (1 - Math.exp(-rate * dt));
 
-const _camPos = new THREE.Vector3();
-const _selfPos = new THREE.Vector3();
 const _delta = new THREE.Quaternion();
 const _euler = new THREE.Euler();
 const _box = new THREE.Box3();
 const _size = new THREE.Vector3();
+const _camPos = new THREE.Vector3();
 
-/** The humanoid bones we actually pose. VRoid always provides all of them. */
+/**
+ * Bones we pose.
+ *
+ * Beyond the basic chain this adds neck, upper chest, feet and toes — the parts
+ * that separate "limbs swinging" from "someone walking". A leg swing with a
+ * rigid ankle reads as a doll on a stick.
+ */
 const BONES = [
   'hips',
   'spine',
   'chest',
+  'upperChest',
+  'neck',
   'head',
   'leftUpperArm',
   'leftLowerArm',
+  'leftHand',
   'rightUpperArm',
   'rightLowerArm',
+  'rightHand',
   'leftUpperLeg',
   'leftLowerLeg',
+  'leftFoot',
+  'leftToes',
   'rightUpperLeg',
   'rightLowerLeg',
+  'rightFoot',
+  'rightToes',
 ] as const;
 
 type BoneName = (typeof BONES)[number];
 
 /**
- * A VRM character, driven by the same procedural locomotion as the built-in rig.
- *
- * The important idea: a VRM has **no animation clips**. VRoid exports a rigged
- * mesh and nothing else, so a conventional pipeline would need Mixamo clips
- * bolted on. But this project already generates locomotion from a phase value
- * rather than sampling authored clips, and VRM guarantees a *named humanoid
- * skeleton* — so the existing pose tables map straight onto it and the model
- * walks, runs, jumps and carries with no animation data at all.
- *
- * Two things have to be handled that the built-in rig does not need:
- *
- * 1. **Rest poses.** Our poses are absolute local rotations, which is fine for
- *    a rig we authored at identity. A VRM's bones have their own rest
- *    orientation (VRoid exports an A-pose), so assigning absolute rotations
- *    would flatten the character into a T-pose the moment it loaded. Every
- *    rotation here is applied as a *delta* against the captured rest pose.
- * 2. **Facing.** VRM 0.0 models look down −Z; everything in this game faces
- *    +Z. `VRMUtils.rotateVRM0` bakes the correction in at load.
+ * `rotateVRM0` turns the scene to face +Z, but the normalized bone space it
+ * wraps still has forward at −Z. Every pitch is therefore negated relative to
+ * the procedural rig — unnegated, the knees hinge the wrong way.
  */
+const S = -1;
+
+/** Rotation that brings a T-posed arm down to the side, about Z. */
+const ARM_DOWN = 1.25;
+
 export class VrmCharacter implements LoadedCharacter {
   readonly definition: CharacterDefinition;
   readonly object3D: THREE.Object3D;
 
   private readonly vrm: VRM;
   private readonly bones = new Map<BoneName, THREE.Object3D>();
-  /** Rest orientation per bone, captured before anything is posed. */
   private readonly rest = new Map<BoneName, THREE.Quaternion>();
   private readonly baseColours = new Map<THREE.Material, THREE.Color>();
 
@@ -70,6 +72,21 @@ export class VrmCharacter implements LoadedCharacter {
   private phase = 0;
   private carrying = false;
   private hipRestY = 0;
+  private hipRestX = 0;
+
+  /** Seconds since the current clip started, for phased jump and land. */
+  private clipTime = 0;
+
+  // ── face ────────────────────────────────────────────────────────────────
+  private blinkTimer = 1 + Math.random() * 3;
+  private blinkValue = 0;
+  /** Target and smoothed value for the emotional expression. */
+  private expression: 'neutral' | 'happy' | 'relaxed' | 'sad' = 'neutral';
+  private expressionValue = 0;
+  private expressionHold = 0;
+
+  /** What the eyes track. Parented to the scene, moved to the camera. */
+  private readonly lookTarget = new THREE.Object3D();
 
   private constructor(vrm: VRM, displayName: string, height: number) {
     this.vrm = vrm;
@@ -81,10 +98,17 @@ export class VrmCharacter implements LoadedCharacter {
       this.bones.set(name, bone);
       this.rest.set(name, bone.quaternion.clone());
     }
-    this.hipRestY = this.bones.get('hips')?.position.y ?? 0;
 
-    // Remember material colours so the scene's day/night tint can be applied
-    // without compounding every frame.
+    const hips = this.bones.get('hips');
+    this.hipRestY = hips?.position.y ?? 0;
+    this.hipRestX = hips?.position.x ?? 0;
+
+    // Eyes track a target we move to the camera each frame. VRM look-at drives
+    // the eye bones, so she actually meets your gaze rather than staring
+    // through you — the cheapest possible "there is someone in there".
+    vrm.scene.add(this.lookTarget);
+    if (vrm.lookAt) vrm.lookAt.target = this.lookTarget;
+
     vrm.scene.traverse((object) => {
       const mesh = object as THREE.Mesh;
       if (!mesh.isMesh) return;
@@ -103,16 +127,11 @@ export class VrmCharacter implements LoadedCharacter {
       source: { kind: 'gltf', url: 'assets/characters/aria.vrm' },
       notes: {
         origin: 'VRoid Studio export (VRM 0.0).',
-        animation: 'No clips in the file; locomotion is generated from the shared pose tables.',
+        animation: 'No clips in the file; locomotion, face and gaze are all generated.',
       },
     };
   }
 
-  /**
-   * Load a `.vrm`. Resolves to null rather than throwing if anything is wrong,
-   * so a bad or missing model leaves the procedural character in place instead
-   * of taking the game down.
-   */
   static async load(url: string, displayName = 'Aria Chen'): Promise<VrmCharacter | null> {
     try {
       const loader = new GLTFLoader();
@@ -125,27 +144,19 @@ export class VrmCharacter implements LoadedCharacter {
         return null;
       }
 
-      // VRM 0.0 faces -Z; the rest of the game faces +Z.
       VRMUtils.rotateVRM0(vrm);
-
-      // Only the safe optimisation. `combineSkeletons` and
-      // `removeUnnecessaryVertices` rewrite skinning data, and on this export
-      // they shredded the arms — trailing streaks of stretched geometry
-      // following the hands. Unused morph targets are the bulk of a VRoid
-      // file's runtime cost anyway, and dropping them touches no skin weights.
+      // Only the optimisation that does not rewrite skin weights.
+      // `combineSkeletons` and `removeUnnecessaryVertices` shredded the arms.
       VRMUtils.combineMorphs(vrm);
 
       vrm.scene.traverse((object) => {
         const mesh = object as THREE.Mesh;
         if (!mesh.isMesh) return;
-        // A VRoid body is tens of thousands of triangles. Putting it in the
-        // shadow pass as well as the main pass roughly doubles its cost for a
-        // silhouette on the ground nobody looks at, and it was most of the
-        // stutter. It still *receives* shadows.
+        // Tens of thousands of triangles; the shadow pass roughly doubled its
+        // cost for a ground silhouette nobody looks at.
         mesh.castShadow = false;
         mesh.receiveShadow = true;
-        // Skinned bounds go stale as bones move; without this she vanishes at
-        // the screen edge mid-stride.
+        // Skinned bounds go stale as bones move.
         mesh.frustumCulled = false;
       });
 
@@ -159,7 +170,6 @@ export class VrmCharacter implements LoadedCharacter {
     }
   }
 
-  /** Measured height of the loaded model, in metres. */
   get height(): number {
     return this.definition.height;
   }
@@ -167,11 +177,25 @@ export class VrmCharacter implements LoadedCharacter {
   play(clip: ClipName): void {
     if (this.clip === clip) return;
     this.clip = clip;
+    this.clipTime = 0;
     this.carrying = clip.startsWith('carry') || clip === 'handoff';
     this.pose = POSES[CLIP_POSE[clip] ?? 'idle'] ?? POSES.idle!;
+
+    // Landing hard and completing a delivery both deserve a face.
+    if (clip === 'land') this.setExpression('relaxed', 0.5);
+    if (clip === 'celebrate' || clip === 'emote_cheer') this.setExpression('happy', 2.2);
+    if (clip === 'handoff') this.setExpression('happy', 1.6);
+  }
+
+  /** Trigger a facial expression for `hold` seconds. */
+  setExpression(name: 'neutral' | 'happy' | 'relaxed' | 'sad', hold = 1.5): void {
+    this.expression = name;
+    this.expressionHold = hold;
   }
 
   update(dt: number): void {
+    this.clipTime += dt;
+
     const rate = 9;
     const c = this.current;
     const p = this.pose;
@@ -185,58 +209,199 @@ export class VrmCharacter implements LoadedCharacter {
 
     this.phase += c.stride * dt * Math.PI * 2;
     const swing = Math.sin(this.phase);
-    const opposite = Math.sin(this.phase + Math.PI);
+    const opposite = -swing;
+    /** 0..1 measure of how much locomotion is happening. */
+    const gait = Math.min(1, c.legSwing / 0.5);
 
-    // Legs: opposed swing, knee bending only on the backswing so the foot
-    // clears the ground rather than scything through it.
-    //
-    // Every X rotation is negated relative to the procedural rig. `rotateVRM0`
-    // turns the scene to face +Z, but the normalized bone space it wraps still
-    // has forward at -Z, so a pitch that swings a limb forward on our own rig
-    // swings it backward here. Unnegated, the knees hinged the wrong way and
-    // she walked like an ostrich — and jumped with her arms behind her.
-    const S = -1;
-    this.rotate('leftUpperLeg', S * swing * c.legSwing, 0, 0);
-    this.rotate('rightUpperLeg', S * opposite * c.legSwing, 0, 0);
-    this.rotate('leftLowerLeg', S * Math.max(0, -swing) * c.legSwing * 1.5, 0, 0);
-    this.rotate('rightLowerLeg', S * Math.max(0, -opposite) * c.legSwing * 1.5, 0, 0);
+    this.poseLegs(swing, opposite, c, gait);
+    this.poseArms(swing, opposite, c);
+    this.poseSpine(swing, c, gait);
+    this.poseAirborne(dt);
+    this.updateFace(dt);
 
-    // Arms counter-swing, from a *lowered* rest.
-    //
-    // three-vrm's normalized bones have an identity rest pose, and the identity
-    // pose for a VRM humanoid is a **T-pose** — arms straight out. So unlike
-    // the procedural rig, "no rotation" here means arms horizontal, and the
-    // first version of this left her walking around like a scarecrow. In
-    // normalized space bringing them down is a rotation about Z of roughly 72°,
-    // positive on the left and negative on the right. (Verified by rendering —
-    // the opposite sign raises them into a victory pose.)
-    const ARM_DOWN = 1.25;
-    const armIn = 0.12;
-    this.rotate('leftUpperArm', S * (opposite * c.armSwing + c.shoulder), 0, ARM_DOWN + armIn);
-    this.rotate('rightUpperArm', S * (swing * c.armSwing + c.shoulder), 0, -ARM_DOWN - armIn);
-    this.rotate('leftLowerArm', S * c.elbow, 0, 0);
-    this.rotate('rightLowerArm', S * c.elbow, 0, 0);
-
-    // Carrying holds the right arm forward, cradling the parcel.
-    if (this.carrying) {
-      this.rotate('rightUpperArm', S * -1.0, 0, -ARM_DOWN * 0.75);
-      this.rotate('rightLowerArm', S * -0.8, 0, 0);
-    }
-
-    // Lean into speed, and bob at twice the stride rate.
-    this.rotate('chest', S * c.lean, 0, 0);
-    this.rotate('spine', S * c.lean * 0.4, 0, 0);
-
-    const hips = this.bones.get('hips');
-    if (hips) hips.position.y = this.hipRestY + Math.abs(Math.cos(this.phase)) * c.bob;
-
-    // Springbones (hair, skirt) and look-at. This is what makes VRoid hair
-    // swing when she moves, and it is the main thing a VRM gives us that the
-    // procedural rig never could.
+    // Springbones (hair, skirt) and eye look-at.
     this.vrm.update(dt);
   }
 
-  lateUpdate(): void {}
+  /**
+   * Legs, with ankles.
+   *
+   * The ankle is what makes a walk read as a walk: the foot stays roughly
+   * parallel to the ground through the stance instead of pivoting rigidly with
+   * the shin, and rolls onto the toe as the leg leaves the ground. Without it
+   * the character skates, which is exactly what the first pass looked like.
+   */
+  private poseLegs(swing: number, opposite: number, c: Pose, gait: number): void {
+    const leg = (
+      side: 'left' | 'right',
+      s: number,
+    ): void => {
+      const thigh = s * c.legSwing;
+      // Knee bends only on the backswing, so the foot clears the ground.
+      const knee = Math.max(0, -s) * c.legSwing * 1.5;
+
+      this.rotate(`${side}UpperLeg` as BoneName, S * thigh, 0, 0);
+      this.rotate(`${side}LowerLeg` as BoneName, S * knee, 0, 0);
+
+      // Counter the limb chain so the sole stays level, then add a toe-off
+      // push as the leg swings back behind the body.
+      const toeOff = Math.max(0, -s) * 0.35 * gait;
+      this.rotate(`${side}Foot` as BoneName, S * (-thigh - knee + toeOff), 0, 0);
+      this.rotate(`${side}Toes` as BoneName, S * toeOff * 0.8, 0, 0);
+    };
+
+    leg('left', swing);
+    leg('right', opposite);
+  }
+
+  /**
+   * Arms, swinging from a lowered rest.
+   *
+   * Identity for a VRM humanoid is a T-pose, so "no rotation" means arms
+   * straight out — everything here is relative to a 72° drop. The elbow bends
+   * *more* on the forward swing than the back, which is what real arms do and
+   * is most of the difference between a swing and a pendulum.
+   */
+  private poseArms(swing: number, opposite: number, c: Pose): void {
+    const armIn = 0.12;
+
+    const arm = (side: 'left' | 'right', s: number, sign: number): void => {
+      const shoulderPitch = s * c.armSwing + c.shoulder;
+      // Forward swing (negative pitch here) gets extra bend.
+      const bend = c.elbow - Math.max(0, -s) * c.armSwing * 0.55;
+
+      this.rotate(
+        `${side}UpperArm` as BoneName,
+        S * shoulderPitch,
+        0,
+        sign * (ARM_DOWN + armIn),
+      );
+      this.rotate(`${side}LowerArm` as BoneName, S * bend, 0, 0);
+      // A relaxed wrist, following the forearm a beat late.
+      this.rotate(`${side}Hand` as BoneName, S * bend * 0.25, 0, 0);
+    };
+
+    arm('left', opposite, 1);
+    arm('right', swing, -1);
+
+    // Carrying: the right arm comes forward and up to cradle the parcel.
+    if (this.carrying) {
+      this.rotate('rightUpperArm', S * -1.0, 0, -ARM_DOWN * 0.72);
+      this.rotate('rightLowerArm', S * -0.95, 0, 0);
+      this.rotate('rightHand', S * -0.2, 0, 0);
+    }
+  }
+
+  /**
+   * Spine, pelvis and head.
+   *
+   * The three things that turn swinging limbs into a body: the pelvis rotates
+   * with the stride, the chest counter-rotates against it, and the head stays
+   * level while everything beneath it moves. Real walking is mostly this — the
+   * legs are the least interesting part.
+   */
+  private poseSpine(swing: number, c: Pose, gait: number): void {
+    const pelvisYaw = swing * 0.14 * gait;
+
+    this.rotate('hips', 0, pelvisYaw, 0);
+    this.rotate('spine', S * c.lean * 0.35, -pelvisYaw * 0.5, 0);
+    this.rotate('chest', S * c.lean * 0.45, -pelvisYaw * 0.8, 0);
+    this.rotate('upperChest', S * c.lean * 0.2, -pelvisYaw * 0.4, 0);
+    // Head counter-rotates the whole chain, so the gaze stays forward and
+    // steady rather than swaying with the shoulders.
+    this.rotate('neck', S * -c.lean * 0.5, pelvisYaw * 0.6, 0);
+
+    const hips = this.bones.get('hips');
+    if (!hips) return;
+
+    // Vertical bob peaks twice per stride, at each mid-stance.
+    hips.position.y = this.hipRestY + Math.abs(Math.cos(this.phase)) * c.bob;
+    // Lateral weight shift toward the standing leg.
+    hips.position.x = this.hipRestX + swing * 0.022 * gait;
+  }
+
+  /**
+   * Jump and landing, phased over time rather than held as one pose.
+   *
+   * A single static pose for a whole jump is what makes it read as a puppet
+   * being lifted. This tucks the legs at the top of the arc, reaches them out
+   * to meet the ground on the way down, and absorbs through the knees on
+   * contact.
+   */
+  private poseAirborne(dt: number): void {
+    void dt;
+    const t = this.clipTime;
+
+    if (this.clip === 'jump_start') {
+      // Extend hard off the ground, arms driving up.
+      const drive = Math.max(0, 1 - t * 4);
+      for (const side of ['left', 'right'] as const) {
+        this.rotate(`${side}UpperLeg` as BoneName, S * -0.25 * drive, 0, 0);
+        this.rotate(`${side}LowerLeg` as BoneName, S * 0.35 * drive, 0, 0);
+        this.rotate(`${side}Foot` as BoneName, S * 0.45 * drive, 0, 0);
+      }
+    } else if (this.clip === 'fall' || this.clip === 'glide') {
+      // Legs tuck slightly and trail; arms already handled by the pose table.
+      for (const side of ['left', 'right'] as const) {
+        this.rotate(`${side}UpperLeg` as BoneName, S * 0.18, 0, 0);
+        this.rotate(`${side}LowerLeg` as BoneName, S * 0.5, 0, 0);
+        this.rotate(`${side}Foot` as BoneName, S * -0.2, 0, 0);
+      }
+    } else if (this.clip === 'land') {
+      // Absorb: deep on contact, recovering over ~0.3 s.
+      const absorb = Math.max(0, 1 - t * 3.2);
+      for (const side of ['left', 'right'] as const) {
+        this.rotate(`${side}UpperLeg` as BoneName, S * 0.5 * absorb, 0, 0);
+        this.rotate(`${side}LowerLeg` as BoneName, S * 0.85 * absorb, 0, 0);
+        this.rotate(`${side}Foot` as BoneName, S * -0.35 * absorb, 0, 0);
+      }
+      const hips = this.bones.get('hips');
+      if (hips) hips.position.y = this.hipRestY - 0.09 * absorb;
+    }
+  }
+
+  /**
+   * Blinking and expression.
+   *
+   * Blinking is the single highest-value animation in any character: a face
+   * that never blinks reads as dead within about four seconds, and it costs one
+   * timer and one blendshape.
+   */
+  private updateFace(dt: number): void {
+    const expressions = this.vrm.expressionManager;
+    if (!expressions) return;
+
+    // ── blink ──
+    this.blinkTimer -= dt;
+    if (this.blinkTimer <= 0) {
+      // Randomised, and occasionally a double blink — a metronome reads as a
+      // tic rather than as breathing.
+      this.blinkTimer = 1.8 + Math.random() * 4;
+      this.blinkValue = 1;
+    }
+    // Closing is fast, opening slower, which is how eyelids actually move.
+    this.blinkValue = Math.max(0, this.blinkValue - dt * 7.5);
+    expressions.setValue('blink', Math.min(1, this.blinkValue * 1.6));
+
+    // ── emotion ──
+    if (this.expressionHold > 0) {
+      this.expressionHold -= dt;
+      if (this.expressionHold <= 0) this.expression = 'neutral';
+    }
+    const target = this.expression === 'neutral' ? 0 : 1;
+    this.expressionValue = damp(this.expressionValue, target, 6, dt);
+
+    for (const name of ['happy', 'relaxed', 'sad'] as const) {
+      expressions.setValue(name, this.expression === name ? this.expressionValue : 0);
+    }
+  }
+
+  /** Point the gaze at the camera, so she looks at the player. */
+  lateUpdate(camera: THREE.Camera): void {
+    camera.getWorldPosition(_camPos);
+    this.lookTarget.parent?.worldToLocal(_camPos);
+    this.lookTarget.position.copy(_camPos);
+  }
 
   getSocket(name: string): THREE.Object3D | null {
     if (name !== 'hand_R') return null;
@@ -244,8 +409,6 @@ export class VrmCharacter implements LoadedCharacter {
   }
 
   setTint(colour: THREE.Color): void {
-    // Same restraint as the procedural rig: a light touch toward the ambient
-    // colour, applied from the stored base so it cannot compound.
     for (const [material, base] of this.baseColours) {
       const withColour = material as THREE.Material & { color?: THREE.Color };
       withColour.color?.copy(base).lerp(colour, 0.14);
@@ -265,11 +428,5 @@ export class VrmCharacter implements LoadedCharacter {
     _euler.set(x, y, z, 'XYZ');
     _delta.setFromEuler(_euler);
     bone.quaternion.copy(rest).multiply(_delta);
-  }
-
-  /** Not used by the VRM path, but part of the character interface. */
-  faceCamera(camera: THREE.Camera): void {
-    camera.getWorldPosition(_camPos);
-    this.object3D.getWorldPosition(_selfPos);
   }
 }
