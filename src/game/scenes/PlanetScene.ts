@@ -49,6 +49,7 @@ const _sunUp = new THREE.Vector3();
 const _sunTangent = new THREE.Vector3();
 const _sunDir = new THREE.Vector3();
 const _charFacing = new THREE.Vector3();
+const _characterUp = new THREE.Vector3();
 const _camForward = new THREE.Vector3();
 const _tint = new THREE.Color();
 const DUSK_TINT = new THREE.Color('#7f8aa8');
@@ -906,6 +907,21 @@ export class PlanetScene implements IScene {
 
   private syncCharacterAnimation(dt: number): void {
     if (!this.character) return;
+
+    // Hand the rig the body's actual motion before it poses anything. A
+    // generated gait that cannot see the speed it is meant to be walking at
+    // can only guess the cadence, and a guessed cadence slides.
+    if (this.character.setLocomotion) {
+      const position = this.player.object3D.position;
+      _characterUp.copy(position).normalize();
+      this.character.setLocomotion({
+        speed: this.controller.planarSpeed,
+        verticalSpeed: this.controller.velocity.dot(_characterUp),
+        grounded: this.controller.grounded,
+        turnRate: 0,
+      });
+    }
+
     this.character.update(dt);
 
     if (this.glide.isGliding) {

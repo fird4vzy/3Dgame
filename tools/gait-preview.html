@@ -1,0 +1,204 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Gait contact sheet</title>
+    <style>
+      body { margin: 0; background: #0d1020; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      /**
+       * Walk, run and jump, laid out as a contact sheet.
+       *
+       * Locomotion is generated, so the only way to review it is to look at it
+       * — and the only way to look at a cycle is to freeze it at even intervals
+       * side by side. Driving `VrmCharacter` directly with synthetic
+       * `LocomotionSample`s keeps this deterministic: no physics, no input, no
+       * frame-timing luck, so two runs of this page are byte-identical.
+       *
+       * It also *measures* the thing screenshots cannot prove. A stationary rig
+       * cannot show you sliding feet, but the numbers can: through stance, the
+       * planted foot must travel backwards through the body's frame at exactly
+       * the speed the body is moving forwards. `window.__gaitReport` returns
+       * that, and `shoot-gait.mjs` asserts on it.
+       */
+      import * as THREE from 'three';
+      import { VrmCharacter } from '/src/game/entities/VrmCharacter.ts';
+      import { cycleLength } from '/src/game/entities/gait.ts';
+
+      const COLS = 8;
+      const CELL_W = 190;
+      const CELL_H = 330;
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(1);
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color('#161b30');
+      scene.add(new THREE.AmbientLight(0xa8b6e0, 1.5));
+      const key = new THREE.DirectionalLight(0xfff2e0, 2.2);
+      key.position.set(4, 7, 6);
+      scene.add(key);
+      const rim = new THREE.DirectionalLight(0x8fb0ff, 1.0);
+      rim.position.set(-5, 3, -4);
+      scene.add(rim);
+
+      // Ground reference. Without it there is no way to tell a foot resting on
+      // the floor from a foot hovering two centimetres above it.
+      const grid = new THREE.GridHelper(6, 24, 0x4a5a8c, 0x2b3454);
+      scene.add(grid);
+
+      const camera = new THREE.PerspectiveCamera(26, CELL_W / CELL_H, 0.1, 100);
+
+      const character = await VrmCharacter.load('/assets/characters/aria.vrm');
+      if (!character) throw new Error('aria.vrm did not load');
+      scene.add(character.object3D);
+
+      /** Advance the rig without drawing, to let the smoothers settle. */
+      function warm(sample, seconds = 2.5, dt = 1 / 60) {
+        for (let t = 0; t < seconds; t += dt) {
+          character.setLocomotion(sample);
+          character.update(dt);
+        }
+      }
+
+      /** World position of a normalized humanoid bone, after a pose. */
+      const _v = new THREE.Vector3();
+      function bonePosition(name) {
+        character.object3D.updateWorldMatrix(true, true);
+        const bone = character.getBone(name);
+        return bone ? bone.getWorldPosition(_v).clone() : null;
+      }
+
+      const rows = [];
+
+      /**
+       * Render one row of `COLS` frames and record foot positions.
+       *
+       * `advance` returns the sample and dt for frame `i`, so a row can be a
+       * steady gait cycle or a ballistic arc without special-casing either.
+       */
+      function row(label, clip, warmSample, advance) {
+        character.play(clip);
+        warm(warmSample);
+
+        const frames = [];
+        const y = rows.length;
+        for (let i = 0; i < COLS; i++) {
+          const { sample, dt, clip: frameClip } = advance(i);
+          if (frameClip) character.play(frameClip);
+          character.setLocomotion(sample);
+          character.update(dt);
+
+          const left = bonePosition('leftFoot');
+          const right = bonePosition('rightFoot');
+          frames.push({
+            left: left ? { x: +left.x.toFixed(4), y: +left.y.toFixed(4), z: +left.z.toFixed(4) } : null,
+            right: right ? { x: +right.x.toFixed(4), y: +right.y.toFixed(4), z: +right.z.toFixed(4) } : null,
+            dt,
+            speed: sample.speed,
+            phase: +character.gaitPhase.toFixed(4),
+          });
+
+          renderer.setViewport(i * CELL_W, y * CELL_H, CELL_W, CELL_H);
+          renderer.setScissor(i * CELL_W, y * CELL_H, CELL_W, CELL_H);
+          renderer.render(scene, camera);
+        }
+        rows.push({ label, frames });
+      }
+
+      // A pure side view: the only angle a walk cycle can honestly be judged
+      // from, because it is the one where the stride length is visible.
+      camera.position.set(3.4, 0.95, 0);
+      camera.lookAt(0, 0.88, 0);
+
+      // Rows are drawn bottom-up by viewport, so queue them in reverse order.
+      const WALK = 2.3;
+      const RUN = 4.9;
+
+      renderer.setSize(CELL_W * COLS, CELL_H * 3);
+      renderer.setScissorTest(true);
+
+      // ── row 3 (bottom): a jump, sampled across its arc ──
+      row(
+        'jump',
+        'jump_start',
+        { speed: WALK, verticalSpeed: 0, grounded: true, turnRate: 0 },
+        (i) => {
+          // +6 m/s up, gravity pulling it down: rise, apex, fall, contact.
+          const v = 6 - i * 1.9;
+          const airborne = i < COLS - 1;
+          return {
+            sample: { speed: WALK, verticalSpeed: airborne ? v : 0, grounded: !airborne, turnRate: 0 },
+            dt: 1 / 12,
+            clip: !airborne ? 'land' : v > 0 ? 'jump_start' : 'fall',
+          };
+        },
+      );
+
+      // ── row 2 (middle): a run ──
+      row(
+        'run',
+        'run',
+        { speed: RUN, verticalSpeed: 0, grounded: true, turnRate: 0 },
+        () => ({
+          sample: { speed: RUN, verticalSpeed: 0, grounded: true, turnRate: 0 },
+          dt: cycleLength(RUN) / (COLS * RUN),
+        }),
+      );
+
+      // ── row 1 (top): a walk ──
+      row(
+        'walk',
+        'walk',
+        { speed: WALK, verticalSpeed: 0, grounded: true, turnRate: 0 },
+        () => ({
+          sample: { speed: WALK, verticalSpeed: 0, grounded: true, turnRate: 0 },
+          dt: cycleLength(WALK) / (COLS * WALK),
+        }),
+      );
+
+      /**
+       * A fine-grained pass, for measurement only.
+       *
+       * Eight columns is the right number to *look* at and far too few to
+       * measure with: at a 38% stance only three of them land while a foot is
+       * actually planted, so an average over all eight is mostly swing. This
+       * walks a whole cycle at 48 samples and reports every one, and the ankle
+       * height while standing still, which is the datum for "on the ground".
+       */
+      window.__gaitMeasure = (speed, samples = 48) => {
+        character.play('idle');
+        warm({ speed: 0, verticalSpeed: 0, grounded: true, turnRate: 0 }, 2);
+        character.object3D.updateWorldMatrix(true, true);
+        const restY = character.getBone('leftFoot').getWorldPosition(_v).y;
+
+        const sample = { speed, verticalSpeed: 0, grounded: true, turnRate: 0 };
+        character.play(speed > 3 ? 'run' : 'walk');
+        warm(sample, 3);
+
+        const dt = cycleLength(speed) / (samples * speed);
+        const frames = [];
+        for (let i = 0; i < samples; i++) {
+          character.setLocomotion(sample);
+          character.update(dt);
+          const l = bonePosition('leftFoot');
+          const r = bonePosition('rightFoot');
+          frames.push({
+            phase: +character.gaitPhase.toFixed(5),
+            left: { y: +l.y.toFixed(5), z: +l.z.toFixed(5) },
+            right: { y: +r.y.toFixed(5), z: +r.z.toFixed(5) },
+          });
+        }
+        return { speed, dt, restY: +restY.toFixed(5), frames };
+      };
+
+      window.__gaitReport = () => rows;
+      window.__gaitReady = true;
+    </script>
+  </body>
+</html>

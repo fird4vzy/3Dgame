@@ -6,6 +6,7 @@ import type { EventBus } from '@core/events/EventBus';
 import { tuning } from '@config/tuning';
 import { GRAVITY, PLAYER_HEIGHT, PLAYER_RADIUS } from '@config/constants';
 import { PlanetTerrain } from '@game/world/PlanetTerrain';
+import { stepLength } from '@game/entities/gait';
 import { computeMovementBasis, inputToWorld } from './movementBasis';
 
 export type LocomotionState = 'idle' | 'walking' | 'running' | 'jumping' | 'falling' | 'landing';
@@ -324,7 +325,10 @@ export class SphericalCharacterController extends Component {
     const travelled = this.entity.object3D.position.distanceTo(previous);
     this.footstepAccumulator += travelled;
 
-    const stride = this.state === 'running' ? 1.55 : 0.95;
+    // The *same* function the character rig advances its gait phase with, so a
+    // footfall sound always lands on a frame where a foot is on the ground.
+    // Two independent cadences is why the old walk sounded a beat off itself.
+    const stride = stepLength(this.planarSpeed);
     if (this.footstepAccumulator < stride) return;
     this.footstepAccumulator = 0;
 

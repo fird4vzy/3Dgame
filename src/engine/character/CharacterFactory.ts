@@ -9,6 +9,24 @@ import {
 } from './CharacterDefinition';
 
 /**
+ * How the body is actually moving this frame.
+ *
+ * A clip name says *what* the character is doing; this says how hard. Rigs that
+ * generate their animation need it to lock cadence to ground speed and to shape
+ * a jump around its real arc — without it they can only guess, and a guessed
+ * cadence is what makes feet slide. Sampled-clip rigs ignore it.
+ */
+export interface LocomotionSample {
+  /** Speed across the surface, m/s. */
+  speed: number;
+  /** Speed along the local up axis; positive is rising. */
+  verticalSpeed: number;
+  grounded: boolean;
+  /** Signed yaw rate about the character's own up axis, rad/s. Positive turns left. */
+  turnRate: number;
+}
+
+/**
  * A loaded character, whatever form its art arrived in.
  *
  * Gameplay code drives this interface and never learns whether it is animating
@@ -20,6 +38,8 @@ export interface LoadedCharacter {
   readonly object3D: THREE.Object3D;
   /** Play a canonical clip; unknown clips resolve through the fallback chain. */
   play(clip: ClipName, restart?: boolean): void;
+  /** Optional: feed the rig this frame's motion. Ignored by clip-driven rigs. */
+  setLocomotion?(sample: LocomotionSample): void;
   update(dt: number): void;
   /** Orient for rendering. `facing` is the character's own forward direction. */
   lateUpdate(camera: THREE.Camera, facing?: THREE.Vector3): void;
