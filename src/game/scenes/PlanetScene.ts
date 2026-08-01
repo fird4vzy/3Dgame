@@ -35,6 +35,7 @@ import { DeliverySystem } from '@game/systems/DeliverySystem';
 import { ShardSystem } from '@game/systems/ShardSystem';
 import { ParticleSystem } from '@engine/vfx/ParticleSystem';
 import { buildDistrictProps, buildLighthouse } from '@game/entities/districtProps';
+import { Skydome, createStarfield } from '@game/world/Skydome';
 
 import { DISTRICTS, NPCS, npcById, type DistrictId, type ParcelWeight } from '../../data/content';
 
@@ -52,9 +53,7 @@ const _emitPos = new THREE.Vector3();
 const DUST_COLOUR = new THREE.Color('#b9ae94');
 /** Matches the shard mesh's emissive, so the burst reads as the shard itself. */
 const SHARD_COLOUR = new THREE.Color('#f6bd60');
-const _skyColour = new THREE.Color();
-const SKY_DUSK = new THREE.Color('#141724');
-const SKY_LIT = new THREE.Color('#413a5c');
+const _skyUp = new THREE.Vector3();
 
 export interface PlanetSceneCallbacks {
   onDistrictChanged?(id: DistrictId, displayName: string): void;
@@ -103,6 +102,7 @@ export class PlanetScene implements IScene {
   private lighthouse: { lamp: THREE.Mesh; light: THREE.PointLight } | null = null;
   private stars: THREE.Points | null = null;
   private skyLevel = -1;
+  private skydome!: Skydome;
 
   private parcelVisual: { group: THREE.Group; glow: THREE.PointLight; core: THREE.Mesh } | null =
     null;
@@ -325,6 +325,7 @@ export class PlanetScene implements IScene {
   }
 
   dispose(): void {
+    this.skydome.dispose();
     this.particles.dispose();
     this.character?.dispose();
     this.interaction.clear();
@@ -362,8 +363,12 @@ export class PlanetScene implements IScene {
 
   private buildEnvironment(): void {
     const scene = this.world.scene;
-    scene.background = new THREE.Color('#141724');
+    // No flat clear colour: the dome's gradient follows the player's local up,
+    // which a fixed background cannot do on a planet you can walk right around.
     scene.fog = new THREE.Fog('#1b2033', 40, 190);
+
+    this.skydome = new Skydome();
+    scene.add(this.skydome.mesh);
 
     scene.add(this.terrain.mesh);
     scene.add(this.terrain.water);
@@ -718,15 +723,20 @@ export class PlanetScene implements IScene {
   private updateSky(): void {
     const total = this.districts.all.reduce((sum, d) => sum + d.light, 0);
     const fraction = total / Math.max(1, this.districts.all.length);
+
+    // The gradient axis is the player's local up — walk far enough and world +Y
+    // stops meaning "overhead". This has to run every frame because the player
+    // moves; the palette work below only runs when illumination changes.
+    _skyUp.copy(this.controller.smoothedPosition).normalize();
+    this.skydome.update(_skyUp, fraction);
+
     if (Math.abs(fraction - this.skyLevel) < 0.002) return;
     this.skyLevel = fraction;
 
-    _skyColour.copy(SKY_DUSK).lerp(SKY_LIT, fraction);
-    (this.world.scene.background as THREE.Color)?.copy(_skyColour);
-
     const fog = this.world.scene.fog as THREE.Fog | null;
     if (fog) {
-      fog.color.copy(_skyColour);
+      // Fog must match the horizon band, or the terrain edge cuts against it.
+      this.skydome.horizonColour(fog.color, fraction);
       // Visibility opens up as the world lights: dusk hides the far side.
       fog.near = 40 + fraction * 30;
       fog.far = 190 + fraction * 90;
@@ -734,8 +744,7 @@ export class PlanetScene implements IScene {
 
     if (this.stars) {
       const material = this.stars.material as THREE.PointsMaterial;
-      material.opacity = 1 - fraction * 0.75;
-      material.transparent = true;
+      material.opacity = Math.max(0, 1 - fraction * 0.85);
     }
   }
 
@@ -869,24 +878,7 @@ export class PlanetScene implements IScene {
   }
 
   private addStars(scene: THREE.Scene): void {
-    const count = 900;
-    const positions = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      const u = Math.random() * 2 - 1;
-      const theta = Math.random() * Math.PI * 2;
-      const r = Math.sqrt(1 - u * u);
-      const radius = 240 + Math.random() * 40;
-      positions[i * 3] = r * Math.cos(theta) * radius;
-      positions[i * 3 + 1] = u * radius;
-      positions[i * 3 + 2] = r * Math.sin(theta) * radius;
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    this.stars = new THREE.Points(
-      geometry,
-      new THREE.PointsMaterial({ color: 0xcfd6ee, size: 1.1, sizeAttenuation: false }),
-    );
-    this.stars.name = 'stars';
+    this.stars = createStarfield();
     scene.add(this.stars);
   }
 
