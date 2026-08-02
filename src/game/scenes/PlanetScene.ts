@@ -332,6 +332,7 @@ export class PlanetScene implements IScene {
     this.syncCharacterAnimation(dt);
     this.updateCharacterTint();
     this.updateVillagers(dt);
+    this.terrain.update(dt);
     this.updateFireflies(dt);
     this.updateParcelVisual(dt);
     this.updateLighthouse();

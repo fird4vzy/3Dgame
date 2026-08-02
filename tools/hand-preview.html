@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Hand check</title>
+    <style>body{margin:0;background:#1b2136}canvas{display:block}</style>
+  </head>
+  <body>
+    <script type="module">
+      import * as THREE from 'three';
+      import { VrmCharacter } from '/src/game/entities/VrmCharacter.ts';
+
+      const W = 420, H = 460, COLS = 3;
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(1);
+      renderer.setSize(W * COLS, H);
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color('#1b2136');
+      scene.add(new THREE.AmbientLight(0xc0ccee, 2.2));
+      const key = new THREE.DirectionalLight(0xfff2e0, 2.4);
+      key.position.set(3, 5, 4);
+      scene.add(key);
+
+      const camera = new THREE.PerspectiveCamera(30, W / H, 0.01, 20);
+
+      const character = await VrmCharacter.load('/assets/characters/aria.vrm');
+      scene.add(character.object3D);
+
+      function settle(sample, clip, seconds = 2.5) {
+        character.play(clip);
+        for (let t = 0; t < seconds; t += 1 / 60) {
+          character.setLocomotion(sample);
+          character.update(1 / 60);
+        }
+      }
+
+      const still = { speed: 0, verticalSpeed: 0, grounded: true, turnRate: 0 };
+      const run = { speed: 4.9, verticalSpeed: 0, grounded: true, turnRate: 0 };
+
+      const shots = [
+        ['idle', still, 'idle'],
+        ['run', run, 'run'],
+        ['carry', still, 'carry_idle'],
+      ];
+
+      renderer.setScissorTest(true);
+      const target = new THREE.Vector3();
+
+      shots.forEach(([, sample, clip], i) => {
+        settle(sample, clip);
+        character.object3D.updateWorldMatrix(true, true);
+
+        // Frame the right hand, from slightly outside and in front.
+        const hand = character.getBone('rightHand');
+        hand.getWorldPosition(target);
+        // Far enough that the whole hand fits with the wrist for scale. Closer
+        // than about half a metre and the camera ends up inside the forearm.
+        camera.position.set(target.x + 0.55, target.y + 0.16, target.z + 0.55);
+        camera.lookAt(target);
+
+        renderer.setViewport(i * W, 0, W, H);
+        renderer.setScissor(i * W, 0, W, H);
+        renderer.render(scene, camera);
+      });
+
+      window.__handReady = true;
+    </script>
+  </body>
+</html>

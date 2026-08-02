@@ -72,8 +72,47 @@ export class PlanetTerrain {
       transparent: true,
       opacity: 0.86,
     });
+
+    // Move the surface in the vertex shader.
+    //
+    // A still sphere reads as painted glass, and it was the one thing in the
+    // world with no motion at all. Two crossed sine waves in world space are
+    // enough — the eye is looking for *change*, not for correct fluid dynamics,
+    // and the amplitude is centimetres.
+    //
+    // It has to happen on the GPU. This is a detail-5 icosphere, and walking
+    // ten thousand vertices on the CPU every frame to move them a few
+    // centimetres is exactly the kind of cost that never shows up in a profile
+    // as one big number and quietly eats a third of the frame.
+    //
+    // `onBeforeCompile` rather than a custom material, so the toon banding,
+    // fog and shadows all keep working.
+    waterMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = this.waterTime;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float uTime;')
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+           vec3 swellDir = normalize(transformed);
+           float swell =
+             sin(transformed.x * 0.55 + uTime * 0.9) * 0.5 +
+             sin(transformed.z * 0.41 - uTime * 0.7) * 0.5 +
+             sin((transformed.x + transformed.y) * 0.23 + uTime * 0.35);
+           transformed += swellDir * swell * 0.085;`,
+        );
+    };
+
     this.water = new THREE.Mesh(waterGeometry, waterMaterial);
     this.water.name = 'water';
+  }
+
+  /** Shared with the water shader; advanced by `update`. */
+  private readonly waterTime = { value: 0 };
+
+  /** Advance the swell. Called once a frame. */
+  update(dt: number): void {
+    this.waterTime.value += dt;
   }
 
   /**

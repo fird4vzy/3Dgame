@@ -64,7 +64,50 @@ const BONES = [
   'rightLowerLeg',
   'rightFoot',
   'rightToes',
+
+  // Fingers.
+  //
+  // A VRM rig carries all fifteen joints per hand and we were posing none of
+  // them, so the hands stayed in their authored rest pose — flat, splayed and
+  // perfectly rigid whether she was strolling, sprinting or cupping a lumen.
+  // Hands are the second thing anyone looks at after the face; leaving them
+  // frozen undoes a lot of what the rest of the body is doing.
+  'leftThumbMetacarpal',
+  'leftThumbProximal',
+  'leftThumbDistal',
+  'leftIndexProximal',
+  'leftIndexIntermediate',
+  'leftIndexDistal',
+  'leftMiddleProximal',
+  'leftMiddleIntermediate',
+  'leftMiddleDistal',
+  'leftRingProximal',
+  'leftRingIntermediate',
+  'leftRingDistal',
+  'leftLittleProximal',
+  'leftLittleIntermediate',
+  'leftLittleDistal',
+  'rightThumbMetacarpal',
+  'rightThumbProximal',
+  'rightThumbDistal',
+  'rightIndexProximal',
+  'rightIndexIntermediate',
+  'rightIndexDistal',
+  'rightMiddleProximal',
+  'rightMiddleIntermediate',
+  'rightMiddleDistal',
+  'rightRingProximal',
+  'rightRingIntermediate',
+  'rightRingDistal',
+  'rightLittleProximal',
+  'rightLittleIntermediate',
+  'rightLittleDistal',
 ] as const;
+
+/** The four fingers, in the order they curl. Thumb is posed separately. */
+const FINGERS = ['Index', 'Middle', 'Ring', 'Little'] as const;
+/** Joints of a finger, outward from the knuckle. */
+const JOINTS = ['Proximal', 'Intermediate', 'Distal'] as const;
 
 type BoneName = (typeof BONES)[number];
 
@@ -532,6 +575,69 @@ export class VrmCharacter implements LoadedCharacter {
     // The left arm swings against the left leg, so it shares its phase.
     arm('left', 0, 1);
     arm('right', 0.5, -1);
+
+    this.poseHands(run);
+  }
+
+  /**
+   * Hands.
+   *
+   * Nobody walks with their fingers straight. A relaxed hand rests with a
+   * gentle curl that deepens as you speed up — by a run it is a loose fist —
+   * and the joints do not curl equally: the knuckle leads, the middle joint
+   * follows hardest, the fingertip trails. Curling all three by the same
+   * amount gives the claw that stock rigs are famous for.
+   *
+   * The carrying hand closes further, around something with a size. That is
+   * the difference between holding a lumen and having one stuck to your palm.
+   *
+   * Fingers hinge about **Y**, for the same reason the elbow does: they
+   * inherit the arm's rotated frame, where local X runs along the limb. See
+   * the note in `poseArms`.
+   */
+  private poseHands(run: number): void {
+    // A little life even at a standstill, so they are never perfectly still.
+    const breathe = Math.sin(this.clipTime * 1.1) * 0.02;
+
+    for (const side of ['left', 'right'] as const) {
+      const sign = side === 'left' ? 1 : -1;
+
+      // Relaxed at rest, firmer at a run.
+      let curl = 0.28 + 0.34 * run + breathe;
+      let spread = 0.05;
+
+      // The carrying hand wraps a lumen; the other stays relaxed.
+      if (this.carrying && side === 'right') {
+        curl = 0.62;
+        spread = 0.16;
+      }
+
+      FINGERS.forEach((finger, index) => {
+        // Little finger curls most, index least — the natural cascade across
+        // the hand that makes a relaxed fist look relaxed.
+        const across = 1 + index * 0.13;
+        // Knuckle, middle, tip. The middle joint does most of the work.
+        const perJoint = [0.85, 1.15, 0.7];
+
+        JOINTS.forEach((joint, j) => {
+          this.rotate(
+            `${side}${finger}${joint}` as BoneName,
+            0,
+            sign * curl * across * (perJoint[j] ?? 1),
+            // Only the knuckle fans; the joints beyond it cannot.
+            j === 0 ? sign * spread * (index - 1.5) * 0.5 : 0,
+          );
+        });
+      });
+
+      // The thumb opposes rather than curls, so it gets its own, smaller pose
+      // on a different axis — flattening it into the finger loop is what makes
+      // a hand look like a mitten.
+      const thumb = curl * 0.5;
+      this.rotate(`${side}ThumbMetacarpal` as BoneName, 0, 0, -sign * (0.25 + thumb * 0.4));
+      this.rotate(`${side}ThumbProximal` as BoneName, 0, sign * thumb * 0.7, 0);
+      this.rotate(`${side}ThumbDistal` as BoneName, 0, sign * thumb * 0.6, 0);
+    }
 
     // Carrying: the right arm comes forward and up to cradle the parcel.
     if (this.carrying) {
