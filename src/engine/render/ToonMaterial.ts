@@ -24,7 +24,14 @@ export function toonGradient(bands = 3): THREE.DataTexture {
   for (let i = 0; i < bands; i++) {
     // Keep the darkest band well above black: on a dusk planet, unlit faces
     // still have to read as material rather than as holes.
-    const level = 0.35 + (i / Math.max(1, bands - 1)) * 0.65;
+    //
+    // The range is deliberately *narrow* — 0.58 to 1.0 rather than 0.35 to 1.0.
+    // Flat-colour art is flat because the shadow is a small step away from the
+    // light, not because there are few steps: spread the same three bands over
+    // twice the tonal range and the eye reads a gradient with banding artefacts
+    // instead of a drawn shadow. Narrowing it is most of what separates "cel
+    // shading" from a picture that looks painted.
+    const level = 0.58 + (i / Math.max(1, bands - 1)) * 0.42;
     data[i] = Math.round(level * 255);
   }
 

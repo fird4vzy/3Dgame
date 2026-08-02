@@ -11,15 +11,25 @@ import {
 
 export type SurfaceKind = 'grass' | 'sand' | 'stone';
 
+/**
+ * Surface palette.
+ *
+ * Deliberately desaturated towards sage and stone. The reference art is built
+ * almost entirely out of muted colour — sage green, grey-teal, dusty red — and
+ * saturation is what was making our planet read as a toy rather than a place.
+ * Cel shading exaggerates saturation, because a flat fill has nothing to break
+ * it up the way texture and gradient do, so the fills have to start quieter
+ * than they would in a lit renderer.
+ */
 const PALETTE: Record<SurfaceKind, THREE.Color> = {
-  grass: new THREE.Color('#5d9e63'),
-  sand: new THREE.Color('#d8c58c'),
-  stone: new THREE.Color('#8d8b93'),
+  grass: new THREE.Color('#6d8a63'),
+  sand: new THREE.Color('#cabb95'),
+  stone: new THREE.Color('#8b8b8f'),
 };
 
 /** Grass is a range, not a value — see `paint`. */
-const GRASS_LOW = new THREE.Color('#3f6b47');
-const GRASS_HIGH = new THREE.Color('#79ad63');
+const GRASS_LOW = new THREE.Color('#4c6350');
+const GRASS_HIGH = new THREE.Color('#87a271');
 
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
 
