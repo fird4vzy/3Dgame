@@ -35,7 +35,13 @@ export function createLamp(): { group: THREE.Group; light: THREE.PointLight; bul
   //
   // The 12 m range cut the pool off well before the physical falloff had, so
   // adjacent lamps left dark gaps between them along a street.
-  const light = new THREE.PointLight(0xe8a33a, 0, 18, 2);
+  //
+  // Decay 1.4 rather than the physical 2. Strict inverse-square across the 2–8 m
+  // a player actually walks past a lamp is a 16:1 swing — bright enough to blow
+  // a wall out at arm's length and still too dim to read from across the plaza.
+  // Softening it trades physical accuracy for a lamp that works at every
+  // distance, which is the correct trade for a cel-shaded game.
+  const light = new THREE.PointLight(0xe8a33a, 0, 18, 1.4);
   light.position.y = 2.7;
   group.add(light);
 

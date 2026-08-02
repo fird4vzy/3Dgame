@@ -494,12 +494,18 @@ export class PlanetScene implements IScene {
     //
     // Every third-person game does this. It is not cheating; it is the reason
     // you can see the protagonist at night.
-    this.characterFill = new THREE.PointLight(0xa8bce8, 2.1, 4.5, 2);
+    //
+    // Kept well under the bloom threshold (0.55). These were first tuned on a
+    // machine where post-processing was off, and at 2.1 they lit her pale skin
+    // hot enough that bloom picked it up and gave her a glowing white outline.
+    // A character light is meant to be invisible; the moment you can see it, it
+    // is too strong.
+    this.characterFill = new THREE.PointLight(0xa8bce8, 1.05, 5.0, 2);
     scene.add(this.characterFill);
 
     // ...and a warm rim from the opposite side, which is what separates her
     // from the background rather than merely brightening her.
-    this.characterRim = new THREE.PointLight(0xffd2a0, 1.3, 4.0, 2);
+    this.characterRim = new THREE.PointLight(0xffd2a0, 0.3, 4.5, 2);
     scene.add(this.characterRim);
 
     scene.add(this.sun, this.sun.target);

@@ -42,13 +42,27 @@ export class Skydome {
         // gone" while leaving the planet legible — and it makes the amber of
         // the first lit district land against a complement rather than against
         // nothing.
-        uZenithDark: { value: new THREE.Color('#141b33') },
-        uHorizonDark: { value: new THREE.Color('#38466f') },
-        uGlowDark: { value: new THREE.Color('#6a5a7d') },
+        //
+        // The stops are read off a painted dusk colour key rather than picked
+        // by eye. A real twilight is not two colours: it runs amber at the
+        // horizon, through dusty rose and mauve, into slate, and only then to
+        // indigo overhead. Two stops cannot hold that, so there is a third —
+        // `uMid` — and the difference is most of what separates a sky from a
+        // background.
+        uZenithDark: { value: new THREE.Color('#111930') },
+        uMidDark: { value: new THREE.Color('#2b3559') },
+        uHorizonDark: { value: new THREE.Color('#46527a') },
+        uGlowDark: { value: new THREE.Color('#7a6a86') },
         // Restored palette — a warm evening, not a blue afternoon.
-        uZenithLit: { value: new THREE.Color('#2b2a52') },
-        uHorizonLit: { value: new THREE.Color('#6d5a7d') },
-        uGlowLit: { value: new THREE.Color('#eaa65c') },
+        //
+        // This is the colour key at full strength; the dusk set above is the
+        // same ramp with the warmth drained out of it. Keeping them the same
+        // family is what makes ignition read as *the light coming back* rather
+        // than as a different sky being swapped in.
+        uZenithLit: { value: new THREE.Color('#1c2547') },
+        uMidLit: { value: new THREE.Color('#6f6b93') },
+        uHorizonLit: { value: new THREE.Color('#c08a92') },
+        uGlowLit: { value: new THREE.Color('#e8a87c') },
       },
       vertexShader: /* glsl */ `
         varying vec3 vWorldDirection;
@@ -62,9 +76,11 @@ export class Skydome {
         uniform vec3 uUp;
         uniform float uIllumination;
         uniform vec3 uZenithDark;
+        uniform vec3 uMidDark;
         uniform vec3 uHorizonDark;
         uniform vec3 uGlowDark;
         uniform vec3 uZenithLit;
+        uniform vec3 uMidLit;
         uniform vec3 uHorizonLit;
         uniform vec3 uGlowLit;
 
@@ -77,13 +93,20 @@ export class Skydome {
           float height = dot(dir, normalize(uUp));
 
           vec3 zenith  = mix(uZenithDark,  uZenithLit,  uIllumination);
+          vec3 mid     = mix(uMidDark,     uMidLit,     uIllumination);
           vec3 horizon = mix(uHorizonDark, uHorizonLit, uIllumination);
           vec3 glow    = mix(uGlowDark,    uGlowLit,    uIllumination);
 
-          // Two-stop gradient, eased so the transition sits low in the frame
-          // rather than splitting the sky in half.
+          // Three-stop gradient, eased so the transition sits low in the frame
+          // rather than splitting the sky in half. Branchless: the two mixes
+          // hand over at k = 0.58, and smoothstep keeps the seam invisible.
           float t = clamp(height * 0.5 + 0.5, 0.0, 1.0);
-          vec3 colour = mix(horizon, zenith, pow(t, 0.75));
+          float k = pow(t, 0.75);
+          vec3 colour = mix(
+            mix(horizon, mid, smoothstep(0.0, 0.58, k)),
+            zenith,
+            smoothstep(0.58, 1.0, k)
+          );
 
           // A warm band hugging the horizon, tightest and brightest once the
           // planet is lit. This is what reads as atmosphere.

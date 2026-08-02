@@ -154,13 +154,17 @@ export class IlluminationSystem {
         // Candela, not the old arbitrary unit.
         //
         // This was `local * 9`, tuned against three's pre-r155 lighting model.
-        // Since r155 a point light is physical: irradiance falls off as 1/d²,
-        // so 9 cd at the ~8 m a street lamp is usually seen from lands at
-        // about 0.14 — invisible. A district could report `light = 1` with
-        // every lamp reporting "on" and the street stayed pitch dark, which is
-        // exactly what it did. This is the intensity that actually pools light
-        // on the ground.
-        light.intensity = local * 55;
+        // Since r155 a point light is physical, so 9 cd at the ~8 m a street
+        // lamp is usually seen from lands at about 0.14 — invisible. A district
+        // could report `light = 1` with every lamp reporting "on" and the
+        // street stayed pitch dark, which is exactly what it did.
+        //
+        // Paired with the softened decay in `createLamp`: at strict 1/d² the
+        // intensity that reads across the plaza also blows out the wall you are
+        // standing next to, and there is no single number that works at both
+        // ends. Tuned against real bloom — the first pass at this was set on a
+        // machine where post-processing was off and came out far too hot.
+        light.intensity = local * 16;
         light.color.copy(_colour);
       }
 
