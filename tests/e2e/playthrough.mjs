@@ -19,20 +19,34 @@ import { chromium } from 'playwright';
  * exists, then the locally-installed Chrome, then whatever Playwright bundled.
  * Hard-coding one of these is why this suite only ran in one place.
  */
-async function launchBrowser(chromium, args) {
-  const explicit = process.env.LUMENPOST_CHROMIUM;
-  if (explicit) return chromium.launch({ executablePath: explicit, args });
+async function launchBrowser(chromium) {
+  // Software rendering is a *fallback*, not a default.
+  //
+  // This used to pass `--use-gl=swiftshader` unconditionally, which is why the
+  // walk to the recipient timed out on every machine that had a GPU: the scene
+  // rendered at about 5 fps, and the test steers by polling and holding a key,
+  // so at that frame rate the character covered a fraction of the ground the
+  // 90-second budget assumes. The assertion that failed was "reached the
+  // recipient", and nothing was wrong with the game at all.
+  const software = ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'];
+  const common = ['--ignore-gpu-blocklist'];
 
+  const explicit = process.env.LUMENPOST_CHROMIUM;
+  if (explicit) {
+    return chromium.launch({ executablePath: explicit, args: [...common, ...software] });
+  }
+
+  // A CI container has no GPU, so there it really does need the software path.
   const { existsSync } = await import('node:fs');
   const containerPath = '/opt/pw-browsers/chromium';
   if (existsSync(containerPath)) {
-    return chromium.launch({ executablePath: containerPath, args });
+    return chromium.launch({ executablePath: containerPath, args: [...common, ...software] });
   }
 
   try {
-    return await chromium.launch({ channel: 'chrome', args });
+    return await chromium.launch({ channel: 'chrome', args: common });
   } catch {
-    return chromium.launch({ args });
+    return chromium.launch({ args: [...common, ...software] });
   }
 }
 
@@ -44,7 +58,7 @@ const check = (label, ok, detail) => {
   if (!ok) failures.push(label);
 };
 
-const browser = await launchBrowser(chromium, ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']);
+const browser = await launchBrowser(chromium);
 const page = await browser.newPage({ viewport: { width: 1100, height: 700 } });
 
 const consoleErrors = [];

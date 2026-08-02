@@ -74,16 +74,32 @@ export class GameLoop {
     this.callbacks.beginFrame?.();
 
     this.accumulator += frameTime;
+    let ticked = false;
     while (this.accumulator >= FIXED_DT) {
       this.callbacks.fixedUpdate(FIXED_DT);
       this.accumulator -= FIXED_DT;
+      ticked = true;
     }
 
     this.callbacks.update(frameTime);
     this.callbacks.interpolate?.(this.accumulator / FIXED_DT);
     this.callbacks.lateUpdate(frameTime);
     this.callbacks.render();
-    this.callbacks.endFrame?.();
+
+    // Only retire one-shot input once a fixed tick has actually had the chance
+    // to read it.
+    //
+    // `endFrame` clears "pressed this frame", and gameplay reads those flags in
+    // `fixedUpdate`, which runs at 60 Hz. Above 60 fps most render frames run
+    // *no* tick at all — at 150 fps, two in every three — so a press that
+    // landed and was cleared inside one of those frames was never seen by
+    // anything. A quick tap of interact or jump simply did nothing, and the
+    // faster the machine the more often it happened.
+    //
+    // Below 60 fps every frame runs at least one tick, so this is a no-op
+    // there, which is exactly why it went unnoticed: the whole test suite ran
+    // on software rendering at 5 fps.
+    if (ticked) this.callbacks.endFrame?.();
   };
 
   private trackFrameTime(dt: number): void {
