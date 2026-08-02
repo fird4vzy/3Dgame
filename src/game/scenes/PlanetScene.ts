@@ -34,8 +34,9 @@ import { IlluminationSystem } from '@game/systems/IlluminationSystem';
 import { DeliverySystem } from '@game/systems/DeliverySystem';
 import { ShardSystem } from '@game/systems/ShardSystem';
 import { ParticleSystem } from '@engine/vfx/ParticleSystem';
-import { buildDistrictProps, buildLighthouse } from '@game/entities/districtProps';
+import { buildDistrictProps, buildLighthouse, buildVillageSet } from '@game/entities/districtProps';
 import { buildGroundCover } from '@game/entities/groundCover';
+import { Cats, catSpots } from '@game/entities/cats';
 import { Skydome, createStarfield } from '@game/world/Skydome';
 import type { MinimapMarker } from '@game/world/mapMarkers';
 import { buildCourier, type RenRig } from '@game/entities/CourierCharacter';
@@ -117,6 +118,7 @@ export class PlanetScene implements IScene {
   /** Resident rigs, for the idle sway. */
   private readonly villagerRigs: Array<{ rig: RenRig; phase: number }> = [];
   private villagerSway = 0;
+  private cats: Cats | null = null;
   private fireflies!: Fireflies;
   private readonly firefliesColour = new THREE.Color();
 
@@ -333,6 +335,7 @@ export class PlanetScene implements IScene {
     this.updateCharacterTint();
     this.updateVillagers(dt);
     this.terrain.update(dt);
+    this.cats?.update(dt);
     this.updateFireflies(dt);
     this.updateParcelVisual(dt);
     this.updateLighthouse();
@@ -594,13 +597,30 @@ export class PlanetScene implements IScene {
       // horizon is only 13.5 m away and there is no map screen.
       const propSpots = scatterAround(
         centre,
-        def.id === 'spire' ? 10 : 16,
-        def.radius * 0.7,
+        def.id === 'spire' ? 18 : 30,
+        def.radius * 0.85,
         def.id.length * 613 + 7,
       );
       for (const mesh of buildDistrictProps(def.id, propSpots, def.id.length * 331)) {
         this.world.scene.add(mesh);
         // Scenery has to block the camera, or it parks inside a rock.
+        this.cameraOccluders.push(mesh);
+      }
+
+      // Village fittings, in every district including the Spire.
+      //
+      // The landmark props say *which* district you are in; they do not make it
+      // feel lived in. A gate to walk under, a lantern someone lit and a stall
+      // someone runs do — and scattering them wider than the landmarks fills
+      // the ground between districts, which was the emptiest part of the world.
+      const villageSpots = scatterAround(
+        centre,
+        def.id === 'spire' ? 8 : 14,
+        def.radius * 1.15,
+        def.id.length * 877 + 31,
+      );
+      for (const mesh of buildVillageSet(villageSpots, def.id.length * 449)) {
+        this.world.scene.add(mesh);
         this.cameraOccluders.push(mesh);
       }
 
@@ -621,6 +641,20 @@ export class PlanetScene implements IScene {
         this.world.scene.add(mesh);
       }
     }
+
+    // Cats, at the edges of every settlement.
+    //
+    // The one thing on screen with an apparent will of its own. A world can
+    // have buildings, lamps, grass and a sky and still feel abandoned, because
+    // none of those things *do* anything.
+    this.cats = new Cats(
+      catSpots(
+        DISTRICTS.map((d) => ({ centre: surfacePoint(d.centre, 0), radius: d.radius })),
+        3,
+      ),
+    );
+    this.world.scene.add(this.cats.group);
+    for (const cat of this.cats.group.children) this.cullables.push(cat);
 
     // The Spire's lighthouse: tall enough to crest the horizon from outside its
     // own district, which is what makes the final delivery navigable.

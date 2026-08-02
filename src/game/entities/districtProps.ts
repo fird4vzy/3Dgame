@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createToonMaterial } from '@engine/render/ToonMaterial';
 import { makeRng } from '@core/math/rng';
 import type { DistrictId } from '../../data/content';
@@ -218,6 +219,106 @@ export function buildRocks(positions: THREE.Vector3[], seed: number): THREE.Inst
     stretch: { x: 0.3, y: 0.35, z: 0.3 },
     tint: 0.14,
   });
+}
+
+/**
+ * Village fittings, shared by every district.
+ *
+ * The world had a distinct silhouette per district and *nothing between them* —
+ * a stand of trees, then bare ground, then some pipes. Landmarks tell you which
+ * district you are in; they do not make a place feel inhabited. These do: a
+ * gate you walk under, a lantern someone lit, a stall someone runs.
+ *
+ * All four are built from primitives at the same low-poly weight as the rest of
+ * the world, and each is one instanced draw. Nothing here is a texture.
+ */
+export function buildVillageSet(
+  positions: THREE.Vector3[],
+  seed: number,
+): THREE.InstancedMesh[] {
+  const shape: InstanceOptions = {
+    scaleRange: [0.85, 1.2],
+    stretch: { x: 0.1, y: 0.18, z: 0.1 },
+    tint: 0.1,
+  };
+
+  // A gate. Two posts, a curved-up lintel and the second crossbar beneath it —
+  // the whole silhouette is in that lintel, so it gets the flare.
+  const gate = new THREE.BufferGeometry();
+  {
+    const parts: THREE.BufferGeometry[] = [];
+    for (const x of [-0.9, 0.9]) {
+      const post = new THREE.CylinderGeometry(0.11, 0.14, 3.0, 7);
+      post.translate(x, 1.5, 0);
+      parts.push(post);
+    }
+    const lintel = new THREE.BoxGeometry(2.5, 0.17, 0.34);
+    lintel.translate(0, 3.0, 0);
+    parts.push(lintel);
+    const crossbar = new THREE.BoxGeometry(2.05, 0.12, 0.24);
+    crossbar.translate(0, 2.6, 0);
+    parts.push(crossbar);
+    gate.copy(mergeGeometries(parts));
+  }
+
+  // A stone lantern: plinth, shaft, light box, flared cap.
+  const lantern = new THREE.BufferGeometry();
+  {
+    const parts: THREE.BufferGeometry[] = [];
+    const base = new THREE.CylinderGeometry(0.26, 0.32, 0.18, 6);
+    base.translate(0, 0.09, 0);
+    parts.push(base);
+    const shaft = new THREE.CylinderGeometry(0.11, 0.13, 0.62, 6);
+    shaft.translate(0, 0.49, 0);
+    parts.push(shaft);
+    const box = new THREE.CylinderGeometry(0.24, 0.24, 0.3, 6);
+    box.translate(0, 0.95, 0);
+    parts.push(box);
+    const cap = new THREE.CylinderGeometry(0.06, 0.42, 0.24, 6);
+    cap.translate(0, 1.22, 0);
+    parts.push(cap);
+    lantern.copy(mergeGeometries(parts));
+  }
+
+  // A market stall: counter, two posts, a sloped awning.
+  const stall = new THREE.BufferGeometry();
+  {
+    const parts: THREE.BufferGeometry[] = [];
+    const counter = new THREE.BoxGeometry(1.7, 0.75, 0.7);
+    counter.translate(0, 0.38, 0);
+    parts.push(counter);
+    for (const x of [-0.78, 0.78]) {
+      const post = new THREE.CylinderGeometry(0.05, 0.05, 1.9, 5);
+      post.translate(x, 0.95, -0.28);
+      parts.push(post);
+    }
+    const awning = new THREE.BoxGeometry(1.9, 0.08, 1.0);
+    awning.rotateX(-0.32);
+    awning.translate(0, 1.92, 0.06);
+    parts.push(awning);
+    stall.copy(mergeGeometries(parts));
+  }
+
+  // Split the spots between the three, deterministically.
+  const rng = makeRng(seed ^ 0x5f3a);
+  const forGate: THREE.Vector3[] = [];
+  const forLantern: THREE.Vector3[] = [];
+  const forStall: THREE.Vector3[] = [];
+  for (const position of positions) {
+    const roll = rng();
+    if (roll < 0.18) forGate.push(position);
+    else if (roll < 0.68) forLantern.push(position);
+    else forStall.push(position);
+  }
+
+  return [
+    instanced(gate, createToonMaterial({ color: '#9c4a3c' }), forGate, seed + 11, shape),
+    instanced(lantern, createToonMaterial({ color: '#8f9098' }), forLantern, seed + 23, shape),
+    instanced(stall, createToonMaterial({ color: '#7d6a52' }), forStall, seed + 37, {
+      ...shape,
+      tint: 0.18,
+    }),
+  ];
 }
 
 export function buildDistrictProps(
