@@ -32,7 +32,10 @@ export function createLamp(): { group: THREE.Group; light: THREE.PointLight; bul
   group.add(bulb);
 
   // Range 0 keeps the light effectively off until ignition ramps it up.
-  const light = new THREE.PointLight(0xe8a33a, 0, 12, 2);
+  //
+  // The 12 m range cut the pool off well before the physical falloff had, so
+  // adjacent lamps left dark gaps between them along a street.
+  const light = new THREE.PointLight(0xe8a33a, 0, 18, 2);
   light.position.y = 2.7;
   group.add(light);
 

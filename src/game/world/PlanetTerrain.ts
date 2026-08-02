@@ -17,6 +17,18 @@ const PALETTE: Record<SurfaceKind, THREE.Color> = {
   stone: new THREE.Color('#8d8b93'),
 };
 
+/** Grass is a range, not a value — see `paint`. */
+const GRASS_LOW = new THREE.Color('#3f6b47');
+const GRASS_HIGH = new THREE.Color('#79ad63');
+
+const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+/** Hermite ease between two edges — the GLSL one. */
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = clamp01((x - edge0) / (edge1 - edge0));
+  return t * t * (3 - 2 * t);
+}
+
 /**
  * The planet surface.
  *
@@ -143,29 +155,101 @@ export class PlanetTerrain {
     (this.water.material as THREE.Material).dispose();
   }
 
-  /** Push every vertex out to its terrain height and colour it by biome. */
+  /**
+   * Push every vertex out to its terrain height, then colour it.
+   *
+   * Colour is computed **after** `computeVertexNormals`, which is the whole
+   * trick: it makes the true surface normal available, so steepness is exact
+   * and free rather than something we would have to re-derive by sampling
+   * `heightAt` around every vertex.
+   */
   private displace(geometry: THREE.BufferGeometry): void {
     const position = geometry.getAttribute('position') as THREE.BufferAttribute;
     const count = position.count;
-    const colors = new Float32Array(count * 3);
     const v = new THREE.Vector3();
 
     for (let i = 0; i < count; i++) {
       v.fromBufferAttribute(position, i).normalize();
       const height = PlanetTerrain.heightAt(v);
       position.setXYZ(i, v.x * height, v.y * height, v.z * height);
+    }
 
-      const colour = PALETTE[PlanetTerrain.surfaceAt(v)];
+    position.needsUpdate = true;
+    geometry.computeVertexNormals();
+    this.paint(geometry);
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+  }
+
+  /**
+   * Per-vertex surface colour.
+   *
+   * The first pass switched on `surfaceAt`, which returns one of three names.
+   * Three flat colours with hard edges between them is exactly what it looked
+   * like: two enormous bands of unbroken green and tan meeting at a seam. A
+   * whole planet cannot be three values.
+   *
+   * Three things fix it, and none of them needs a texture:
+   *
+   * - **Blend the biomes** over a band instead of switching at a threshold.
+   * - **Rock the slopes.** Steepness, not just altitude, decides stone — which
+   *   is why real hillsides have grey faces and green tops, and it is the
+   *   cheapest single thing that makes terrain read as terrain.
+   * - **Break the flat.** Two octaves of noise modulate value and warmth, so
+   *   no two hillsides are the same green.
+   */
+  private paint(geometry: THREE.BufferGeometry): void {
+    const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+    const normal = geometry.getAttribute('normal') as THREE.BufferAttribute;
+    const count = position.count;
+    const colors = new Float32Array(count * 3);
+
+    const v = new THREE.Vector3();
+    const n = new THREE.Vector3();
+    const colour = new THREE.Color();
+
+    for (let i = 0; i < count; i++) {
+      v.fromBufferAttribute(position, i);
+      const height = v.length();
+      v.normalize();
+      n.fromBufferAttribute(normal, i);
+
+      // 0 on flat ground, rising as the face tilts away from straight up.
+      const slope = 1 - Math.max(0, n.dot(v));
+
+      // Two scales of variation: broad regional drift, and a finer break-up
+      // that stops adjacent facets reading as one painted surface.
+      const broad = fbm3(v.x * 2.6, v.y * 2.6, v.z * 2.6, 3, 2.1, 0.5, WORLD_SEED + 401);
+      const fine = fbm3(v.x * 9.5, v.y * 9.5, v.z * 9.5, 2, 2.4, 0.5, WORLD_SEED + 977);
+      const drift = (broad - 0.5) * 2;
+      const grain = (fine - 0.5) * 2;
+
+      // Grass first, varied between a shaded low green and a sunlit one.
+      colour.copy(GRASS_LOW).lerp(GRASS_HIGH, clamp01(0.5 + drift * 0.75));
+
+      // Sand hugs the waterline.
+      const sand = 1 - smoothstep(SEA_LEVEL_RADIUS + 0.3, SEA_LEVEL_RADIUS + 2.4, height);
+      if (sand > 0) colour.lerp(PALETTE.sand, sand);
+
+      // Stone comes from altitude *or* steepness, whichever is stronger.
+      const byAltitude = smoothstep(
+        PLANET_RADIUS + TERRAIN_AMPLITUDE * 0.4,
+        PLANET_RADIUS + TERRAIN_AMPLITUDE * 0.72,
+        height,
+      );
+      const bySlope = smoothstep(0.05, 0.19, slope);
+      const stone = Math.max(byAltitude, bySlope);
+      if (stone > 0) colour.lerp(PALETTE.stone, stone * 0.92);
+
+      // Finally a little tonal grain, and a touch of depth in the hollows.
+      colour.multiplyScalar(1 + grain * 0.09 - Math.max(0, -drift) * 0.06);
+
       colors[i * 3] = colour.r;
       colors[i * 3 + 1] = colour.g;
       colors[i * 3 + 2] = colour.b;
     }
 
-    position.needsUpdate = true;
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.computeVertexNormals();
-    geometry.computeBoundingBox();
-    geometry.computeBoundingSphere();
   }
 }
 

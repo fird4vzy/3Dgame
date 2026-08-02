@@ -921,7 +921,9 @@ export class PlanetScene implements IScene {
     const level = this.districts.get('spire').light;
     const material = this.lighthouse.lamp.material as THREE.MeshToonMaterial;
     material.emissiveIntensity = level * 3;
-    this.lighthouse.light.intensity = level * 40;
+    // Same physical-units correction as the street lamps, and more of it: the
+    // lighthouse is the one landmark meant to be visible across the district.
+    this.lighthouse.light.intensity = level * 300;
   }
 
   // ── per-frame helpers ───────────────────────────────────────────────────

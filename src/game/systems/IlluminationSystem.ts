@@ -151,14 +151,26 @@ export class IlluminationSystem {
 
       const light = lamps.lights[i];
       if (light) {
-        light.intensity = local * 9;
+        // Candela, not the old arbitrary unit.
+        //
+        // This was `local * 9`, tuned against three's pre-r155 lighting model.
+        // Since r155 a point light is physical: irradiance falls off as 1/d²,
+        // so 9 cd at the ~8 m a street lamp is usually seen from lands at
+        // about 0.14 — invisible. A district could report `light = 1` with
+        // every lamp reporting "on" and the street stayed pitch dark, which is
+        // exactly what it did. This is the intensity that actually pools light
+        // on the ground.
+        light.intensity = local * 55;
         light.color.copy(_colour);
       }
 
       const bulb = lamps.bulbs[i];
       if (bulb) {
         const material = bulb.material as THREE.MeshStandardMaterial;
-        material.emissiveIntensity = local * 2.4;
+        // The bulb has to read as lit *without* bloom, because bloom is off on
+        // the low quality tier — and a player on integrated graphics still
+        // needs to see that the district came back.
+        material.emissiveIntensity = local * 3.2;
         material.emissive.copy(_colour);
       }
     }
