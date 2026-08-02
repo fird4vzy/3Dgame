@@ -9,6 +9,7 @@ import {
   ToneMappingMode,
   VignetteEffect,
 } from 'postprocessing';
+import { InkOutlineEffect } from './InkOutlineEffect';
 import type { QualityTier } from '@engine/platform/Viewport';
 
 /**
@@ -31,6 +32,7 @@ export class PostFX {
   private composer: EffectComposer | null = null;
   private renderPass: RenderPass | null = null;
   private bloom: BloomEffect | null = null;
+  private outline: InkOutlineEffect | null = null;
   private enabled: boolean;
 
   constructor(
@@ -74,11 +76,25 @@ export class PostFX {
       middleGrey: 0.6,
     });
 
+    // Ink outlines, before bloom.
+    //
+    // Order matters and this is the only one that works: bloom has to see the
+    // lines already drawn, or the glow bleeds *over* them and the silhouette it
+    // is meant to be lighting dissolves. Drawn first, a lamp blooms around a
+    // line that stays crisp — which is exactly how the reference reads.
+    this.outline = new InkOutlineEffect({
+      // A fatter line on the high tier, where there are pixels to spare.
+      thickness: tier === 'high' ? 1.2 : 1.0,
+      strength: 0.85,
+    });
+
     // The RenderPass is retargeted per scene rather than rebuilt, since scenes
     // are swapped at runtime.
     this.renderPass = new RenderPass(new THREE.Scene(), camera);
     this.composer.addPass(this.renderPass);
-    this.composer.addPass(new EffectPass(camera, this.bloom, toneMapping, vignette));
+    this.composer.addPass(
+      new EffectPass(camera, this.outline, this.bloom, toneMapping, vignette),
+    );
   }
 
   get isEnabled(): boolean {
@@ -116,5 +132,6 @@ export class PostFX {
     this.composer = null;
     this.renderPass = null;
     this.bloom = null;
+    this.outline = null;
   }
 }

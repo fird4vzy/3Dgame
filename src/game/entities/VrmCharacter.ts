@@ -462,15 +462,31 @@ export class VrmCharacter implements LoadedCharacter {
     const air = airPose(this.motion.verticalSpeed);
     const a = this.airborne;
 
+    // How much of a run this is. Drives the elbow, which is the whole tell.
+    const run = Math.min(1, this.speed / 4.6);
+
     const arm = (side: 'left' | 'right', offset: number, sign: number): void => {
       const s = armSwing(this.phase + offset);
       let shoulderPitch = s * armAmp + c.shoulder;
-      // Forward swing (negative pitch here) gets extra bend.
-      // The elbow folds much harder on the forward swing than the back, which
-      // is what real arms do and is most of the difference between a swing and
-      // a pendulum.
-      let bend = c.elbow - Math.max(0, -s) * (0.5 + armAmp * 1.6);
-      let out = ARM_DOWN + armIn;
+
+      // The elbow is *held*, not swung.
+      //
+      // Previously the fold varied by more than a radian across the cycle,
+      // which reads as an arm being flapped from the shoulder. Look at how
+      // anyone actually runs: the elbow locks near a right angle and stays
+      // there, the forearm tucked in against the ribs, and the *shoulder*
+      // provides the swing. The bend deepens with speed — nearly straight at a
+      // stroll, about 80° at a run — and only breathes a little within a
+      // stride.
+      const held = -0.2 - 1.25 * run;
+      let bend = held - Math.max(0, -s) * armAmp * 0.45;
+
+      // Running brings the upper arms in tight against the ribs.
+      //
+      // `out` rotates the arm *down* from the T-pose, so a larger value tucks
+      // it in and a smaller one lifts it away. Subtracting here spread her arms
+      // wide like a glide — the sign is the opposite of what it reads as.
+      let out = ARM_DOWN + armIn + 0.2 * run;
 
       if (a > 0.001) {
         // Leaving the ground, the arms trail back and down behind the leap.
@@ -521,7 +537,9 @@ export class VrmCharacter implements LoadedCharacter {
     // Lean into speed on top of whatever the current stance asks for. A run
     // that stands as upright as a walk is the giveaway that the lean is a
     // constant rather than a response.
-    const speedLean = Math.min(1, this.speed / 5.2) * 0.16 * (1 - this.airborne);
+    // A runner is visibly pitched forward — it is what stops a sprint reading
+    // as a brisk walk. 0.16 rad was barely 9°; the reference is nearer 18°.
+    const speedLean = Math.min(1, this.speed / 5.2) * 0.32 * (1 - this.airborne);
     const lean = c.lean + speedLean;
 
     this.rotate('hips', 0, pelvisYaw, this.bank * 0.35);

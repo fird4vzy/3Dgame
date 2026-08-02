@@ -209,7 +209,12 @@ export function legPose(phase: number, amp = 1, stance = STANCE): LegPose {
   // is pushing *up* off the ground, and the body ends up at its lowest at
   // push-off — backwards. The pointed toe is what keeps the foot clear through
   // that instant instead.
-  const clearance = bump(p, stance - 0.02, 1.0) * 1.8;
+  //
+  // A run folds it much harder than a walk — heel almost to the backside — and
+  // that deep tuck is one of the loudest signals that someone is running
+  // rather than walking quickly. `run` below is 0 at a walk and 1 at a sprint.
+  const runFold = clamp01((STANCE - stance) / (STANCE - 0.38));
+  const clearance = bump(p, stance - 0.02, 1.0) * (1.8 + 1.15 * runFold);
 
   // Ankle, as three separate actions rather than one curve. Plantarflexion is
   // tight around toe-off: spread earlier it rolls the body up onto the ball of
