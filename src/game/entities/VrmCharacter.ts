@@ -139,6 +139,8 @@ export class VrmCharacter implements LoadedCharacter {
   };
   /** This frame's gait shape, kept so the pelvis can be placed from it. */
   private legAmp = 0;
+  /** Smoothed ground speed. Shapes the pose; never the phase. See `update`. */
+  private speed = 0;
   private stance = 0.62;
   /** Peak downward speed since leaving the ground, so landings scale with the drop. */
   private fallSpeed = 0;
@@ -334,35 +336,50 @@ export class VrmCharacter implements LoadedCharacter {
     // Advance by distance travelled. This is the whole fix for sliding feet:
     // one stride now covers exactly one stride's worth of ground at any speed,
     // including through acceleration.
+    //
+    // Phase uses the *raw* speed, deliberately: it is an integral, so noise
+    // averages out of it and damping here would lose ground-lock.
     if (m.grounded) this.phase = wrapPhase(this.phase + phaseAdvance(m.speed, dt));
+
+    // Everything that shapes the *pose* uses a smoothed speed instead.
+    //
+    // This is what stopped the shaking. `planarSpeed` comes off a fixed-timestep
+    // controller, so between physics ticks it is a held value that jumps, and
+    // capsule depenetration makes it noisy tick to tick anyway. Feeding that
+    // straight into leg amplitude and pelvis height put the noise directly into
+    // her limbs — every frame the stride length and hip height twitched, and she
+    // visibly trembled while walking. A pose is a shape, not a measurement; it
+    // wants the trend, not the sample.
+    this.speed = damp(this.speed, m.grounded ? m.speed : 0, 9, dt);
+    const speed = this.speed;
 
     // Coming to a stop, settle onto the nearer double-support moment rather
     // than fading out mid-swing with one leg hanging.
-    if (m.grounded && m.speed < 0.4) {
+    if (m.grounded && speed < 0.4) {
       this.phase = damp(this.phase, nearestFootfall(this.phase), 7, dt);
     }
 
     // Effort fades the cycle out at a crawl. Below 0.6 m/s the residual slide
     // is a few centimetres a second, which nobody can see; above it the legs
     // are geometrically locked to the ground.
-    const wanted = m.grounded ? Math.min(1, m.speed / 0.6) : 0;
+    const wanted = m.grounded ? Math.min(1, speed / 0.6) : 0;
     this.effort = damp(this.effort, wanted, 12, dt);
 
     // Amplitude is derived from the ground the foot has to cover, not read
     // from a table, so reach and cadence always agree — and the same code
     // fits a character of any height.
-    this.stance = stanceFraction(m.speed);
-    this.legAmp = hipAmplitude(stanceTravel(m.speed), this.legLength) * this.effort;
+    this.stance = stanceFraction(speed);
+    this.legAmp = hipAmplitude(stanceTravel(speed), this.legLength) * this.effort;
     // Arm swing is smaller than it looks like it should be. Most of the
     // apparent reach of a swinging arm is the elbow, not the shoulder, and
     // driving the shoulder hard instead gives the straight-armed march the
     // first pass had.
-    const armAmp = 0.17 + 0.28 * Math.min(1, m.speed / 5.2);
+    const armAmp = 0.17 + 0.28 * Math.min(1, speed / 5.2);
 
     this.trackTurn(dt);
     this.poseLegs(this.legAmp, this.effort, this.stance);
     this.poseArms(armAmp * this.effort, c);
-    this.poseSpine(c, this.effort, m);
+    this.poseSpine(c, this.effort);
     this.poseLanding();
     this.updateFace(dt);
 
@@ -497,14 +514,14 @@ export class VrmCharacter implements LoadedCharacter {
    * level while everything beneath it moves. Real walking is mostly this — the
    * legs are the least interesting part.
    */
-  private poseSpine(c: Pose, gaitWeight: number, m: LocomotionSample): void {
+  private poseSpine(c: Pose, gaitWeight: number): void {
     const shift = lateralShift(this.phase);
     const pelvisYaw = shift * 0.16 * gaitWeight;
 
     // Lean into speed on top of whatever the current stance asks for. A run
     // that stands as upright as a walk is the giveaway that the lean is a
     // constant rather than a response.
-    const speedLean = Math.min(1, m.speed / 5.2) * 0.16 * (1 - this.airborne);
+    const speedLean = Math.min(1, this.speed / 5.2) * 0.16 * (1 - this.airborne);
     const lean = c.lean + speedLean;
 
     this.rotate('hips', 0, pelvisYaw, this.bank * 0.35);

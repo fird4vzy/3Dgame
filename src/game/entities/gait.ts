@@ -50,10 +50,22 @@ const smoothstep = (t: number): number => t * t * (3 - 2 * t);
 
 // ── stride geometry ────────────────────────────────────────────────────────
 
-/** Ground covered by one step at a walk, in metres. */
-export const WALK_STEP = 0.95;
+/**
+ * Ground covered by one step at a walk, in metres.
+ *
+ * These were 0.95 and 1.55, which are *long*. A 1.65 m character taking a 1.1 m
+ * step has to swing the hip about 49° to reach it, and 49° is not a walk — it
+ * is a lunge, which is exactly how it read. Real walking is nearer 25–30°.
+ *
+ * Shortening the step is the right lever rather than capping the hip angle,
+ * because step length and cadence are two ends of the same equation: take
+ * shorter steps at the same speed and the legs simply turn over faster, which
+ * is what a person actually does when they hurry. Capping the angle instead
+ * would break the reach-versus-ground relationship and put the foot-slide back.
+ */
+export const WALK_STEP = 0.72;
 /** Ground covered by one step at a run, in metres. */
-export const RUN_STEP = 1.55;
+export const RUN_STEP = 1.15;
 
 /**
  * Step length at a given speed.
