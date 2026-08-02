@@ -99,6 +99,12 @@ export class PlanetScene implements IScene {
   delivery!: DeliverySystem;
 
   private character: LoadedCharacter | null = null;
+
+  /** The loaded character, for tooling and tests. */
+  get playerCharacter(): LoadedCharacter | null {
+    return this.character;
+  }
+
   private paused = false;
   private playerLocked = false;
 

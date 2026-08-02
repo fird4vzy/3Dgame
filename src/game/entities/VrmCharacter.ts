@@ -169,6 +169,10 @@ export class VrmCharacter implements LoadedCharacter {
   private effort = 0;
   /** Smoothed airborne weight, so take-off and landing blend rather than cut. */
   private airborne = 0;
+  /** Smoothed pelvis drop. A body has mass; see poseSpine. */
+  private hipSink = 0;
+  /** Last frame delta, for smoothers that run outside update(). */
+  private lastDt = 1 / 60;
   /** Smoothed bank angle for turning. */
   private bank = 0;
   /** Hip-to-ankle distance, measured from the rig. Sets the stride reach. */
@@ -681,9 +685,18 @@ export class VrmCharacter implements LoadedCharacter {
     // Put the pelvis where the legs need it, rather than on a decorative sine.
     // This is what makes the feet actually reach the floor at full stride, and
     // the rise and fall it produces is the real one — see `hipDrop`.
+    // Follow the leg geometry, but not instantaneously.
+    //
+    // The solution is continuous and still very *steep* around contact: at a
+    // brisk walk the pelvis covers its whole vertical range in a few frames,
+    // which measured as a 2.5 cm move between two consecutive frames and reads
+    // as a jolt rather than a bob. A body has mass and lags its own legs, so a
+    // damped follow is both smoother and more truthful. 16/s keeps the real
+    // bob and loses the spike.
     const drop = hipDrop(this.phase, this.legAmp, this.stance, this.foot);
+    this.hipSink = damp(this.hipSink, drop, 16, this.lastDt);
     hips.position.y =
-      this.hipRestY - drop * (1 - this.airborne) + c.bob * Math.max(0, 1 - gaitWeight);
+      this.hipRestY - this.hipSink * (1 - this.airborne) + c.bob * Math.max(0, 1 - gaitWeight);
     // Lateral weight shift toward the standing leg.
     hips.position.x = this.hipRestX + shift * 0.026 * gaitWeight;
   }

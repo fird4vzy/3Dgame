@@ -327,39 +327,38 @@ export function hipDrop(
 ): number {
   const standing = foot.thighLength + foot.shinLength;
   const need = (p: number): number => ankleDrop(legPose(p, amp, stance), foot);
-
   const p = wrapPhase(phase);
-  const leftDown = p < stance;
-  const rightDown = wrapPhase(p + 0.5) < stance;
 
-  // Whatever else happens, no foot may end up under the floor. Taking the
-  // longest leg — swinging or not — is a ceiling on how far the pelvis may
-  // sink. It can only ever raise the body, so the worst case is a planted foot
-  // hovering a centimetre or two, which is invisible; the alternative is a foot
-  // disappearing into the terrain, which is not.
-  const noPenetration = standing - Math.max(need(p), need(p + 0.5));
+  // The pelvis rides on whichever leg is currently longest.
+  //
+  // **No branches, and that is the whole point.** This used to switch on which
+  // feet were planted and take the maximum over only those — which meant that
+  // at the instant a foot left the ground its term dropped out of the maximum,
+  // and if it had been the one setting the height, the pelvis fell through a
+  // step. Measured at four centimetres in a single frame, twice per stride: not
+  // a bob, a stutter, and it was what made her tremble as she walked.
+  //
+  // `max` of two continuous functions is continuous, so taking it over *both*
+  // legs unconditionally removes the discontinuity by construction. It also
+  // still guarantees no foot goes under the floor, because the longest leg is
+  // exactly the binding constraint.
+  const contact = standing - Math.max(need(p), need(p + 0.5));
 
-  if (leftDown || rightDown) {
-    let needed = 0;
-    if (leftDown) needed = Math.max(needed, need(p));
-    if (rightDown) needed = Math.max(needed, need(p + 0.5));
-    return Math.min(standing - needed, noPenetration);
-  }
+  // Flight, blended rather than switched.
+  //
+  // Below a 0.5 stance there is a window with no foot down, and there the
+  // pelvis should carry over a small arc rather than dive to meet a leg that is
+  // only passing through. The weight is a half-sine across that window: zero at
+  // both ends, so it joins the grounded solution smoothly instead of stepping
+  // into it. Raising the pelvis can never push a foot through the floor, so the
+  // guarantee above survives.
+  const gap = 0.5 - stance;
+  if (gap <= 1e-4) return contact;
 
-  // Flight. Nothing is touching the ground, so nothing on the ground can
-  // dictate where the pelvis goes — and letting the longest leg dictate it
-  // anyway is exactly the bug this replaced: the body dove downwards to meet a
-  // leg that was only passing through, and the foot skated forwards at 7 m/s
-  // while grazing the floor. Carry the pelvis from the last toe-off to the next
-  // contact instead, over a small ballistic arc.
-  const half = p % 0.5;
-  const u = clamp01((half - stance) / (0.5 - stance));
-  const fromToeOff = standing - need(stance);
-  const toContact = standing - need(0);
+  const u = clamp01(((p % 0.5) - stance) / gap);
+  const flight = Math.sin(Math.PI * u);
   const arc = 0.1 * (1 - stance / 0.5) * standing;
-  const ballistic = fromToeOff + (toContact - fromToeOff) * u - arc * 4 * u * (1 - u);
-
-  return Math.min(ballistic, noPenetration);
+  return contact - arc * flight;
 }
 
 /** Lateral weight shift toward the stance foot, -1..1 (positive = left). */

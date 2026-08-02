@@ -276,17 +276,24 @@ export class PlanetTerrain {
       // Grass first, varied between a shaded low green and a sunlit one.
       colour.copy(GRASS_LOW).lerp(GRASS_HIGH, clamp01(0.5 + drift * 0.75));
 
-      // Sand hugs the waterline.
-      const sand = 1 - smoothstep(SEA_LEVEL_RADIUS + 0.3, SEA_LEVEL_RADIUS + 2.4, height);
+      // Sand hugs the waterline — and only the waterline.
+      //
+      // This band ran to 2.4 m above sea level on a planet whose entire terrain
+      // amplitude is 6 m, so sand claimed most of the habitable surface and the
+      // world read as desert. A beach is the strip you can throw a stone across
+      // from the water; everything past it is grass.
+      const sand = 1 - smoothstep(SEA_LEVEL_RADIUS + 0.02, SEA_LEVEL_RADIUS + 0.38, height);
       if (sand > 0) colour.lerp(PALETTE.sand, sand);
 
-      // Stone comes from altitude *or* steepness, whichever is stronger.
+      // Stone comes from altitude *or* steepness, whichever is stronger. Kept
+      // to genuine peaks for the same reason: rock everywhere is another way of
+      // having no grass.
       const byAltitude = smoothstep(
-        PLANET_RADIUS + TERRAIN_AMPLITUDE * 0.4,
-        PLANET_RADIUS + TERRAIN_AMPLITUDE * 0.72,
+        PLANET_RADIUS + TERRAIN_AMPLITUDE * 0.62,
+        PLANET_RADIUS + TERRAIN_AMPLITUDE * 0.88,
         height,
       );
-      const bySlope = smoothstep(0.05, 0.19, slope);
+      const bySlope = smoothstep(0.12, 0.30, slope);
       const stone = Math.max(byAltitude, bySlope);
       if (stone > 0) colour.lerp(PALETTE.stone, stone * 0.92);
 
