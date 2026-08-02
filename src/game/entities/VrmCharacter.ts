@@ -469,24 +469,26 @@ export class VrmCharacter implements LoadedCharacter {
       const s = armSwing(this.phase + offset);
       let shoulderPitch = s * armAmp + c.shoulder;
 
-      // The elbow is *held*, not swung.
+      // The elbow is held rather than swung — but *gently*.
       //
-      // Previously the fold varied by more than a radian across the cycle,
-      // which reads as an arm being flapped from the shoulder. Look at how
-      // anyone actually runs: the elbow locks near a right angle and stays
-      // there, the forearm tucked in against the ribs, and the *shoulder*
-      // provides the swing. The bend deepens with speed — nearly straight at a
-      // stroll, about 80° at a run — and only breathes a little within a
-      // stride.
-      const held = -0.2 - 1.25 * run;
-      let bend = held - Math.max(0, -s) * armAmp * 0.45;
+      // A previous pass drove this to 1.45 rad at a run, reasoning from the
+      // reference that a runner's elbow locks near a right angle. It does. The
+      // reasoning was right and the result was a Naruto run: arms rigid and
+      // trailing straight out behind her.
+      //
+      // The reason is that the elbow rotates about the *lower arm's* local X,
+      // and the upper arm has already been swung ~72° about Z to bring it down
+      // from the T-pose. The child inherits that rotated frame, so a large
+      // "fold" no longer maps to forward — it swings the forearm out and back.
+      // Small angles stay close enough to the intent to read correctly; large
+      // ones do not, and no amount of sign-flipping fixes that.
+      //
+      // Doing this properly needs the fold applied about the elbow's true hinge
+      // axis rather than a Euler triple. Until then it stays modest.
+      const held = c.elbow - 0.4 * run;
+      let bend = held - Math.max(0, -s) * armAmp * 0.5;
 
-      // Running brings the upper arms in tight against the ribs.
-      //
-      // `out` rotates the arm *down* from the T-pose, so a larger value tucks
-      // it in and a smaller one lifts it away. Subtracting here spread her arms
-      // wide like a glide — the sign is the opposite of what it reads as.
-      let out = ARM_DOWN + armIn + 0.2 * run;
+      let out = ARM_DOWN + armIn;
 
       if (a > 0.001) {
         // Leaving the ground, the arms trail back and down behind the leap.
