@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { EventBus } from '@core/events/EventBus';
 import { walkingDistance } from '@game/world/placement';
 import { Minimap } from './Minimap';
+import { icon } from '../icons';
 import type { MinimapMarker } from '@game/world/mapMarkers';
 
 const _toTarget = new THREE.Vector3();
@@ -283,26 +284,3 @@ function el(tag: string, cssText: string): HTMLElement {
   return element;
 }
 
-/**
- * A masked icon.
- *
- * The mask URL has to be set from script rather than in the stylesheet because
- * it depends on `BASE_URL` — the game is served from a sub-path when deployed,
- * and a hard-coded `/assets/...` in CSS silently resolves to the wrong place
- * there while working perfectly in dev.
- *
- * `-webkit-` first: Safari still needs the prefix for mask-image, and it is a
- * quarter of the mobile audience.
- */
-function icon(name: string, size: number, colour = 'currentColor'): HTMLElement {
-  const element = document.createElement('span');
-  element.className = 'lp-icon';
-  element.setAttribute('aria-hidden', 'true');
-  element.style.width = `${size}px`;
-  element.style.height = `${size}px`;
-  element.style.backgroundColor = colour;
-  const url = `url(${import.meta.env.BASE_URL}assets/ui/icons/${name}.png)`;
-  element.style.setProperty('-webkit-mask-image', url);
-  element.style.setProperty('mask-image', url);
-  return element;
-}

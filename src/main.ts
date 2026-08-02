@@ -422,7 +422,7 @@ function wireGameplay(
   });
 
   bus.on('shard:collected', ({ total, of }) => {
-    ui.showToast(t('toast.shard', { count: total, total: of }));
+    ui.showToast(t('toast.shard', { count: total, total: of }), 2500, 'shard');
   });
 
   bus.on('delivery:completed', ({ contractId, rating }) => {

@@ -1,6 +1,7 @@
 import type { EventBus } from '@core/events/EventBus';
 import './theme/tokens.css';
 import { GamepadNavigator } from './GamepadNavigator';
+import { icon, publishOrnaments, type IconName } from './icons';
 import { TransitionService } from './TransitionService';
 
 export interface UIScreen {
@@ -60,6 +61,9 @@ export class UIManager {
 
     // The wipe lives above every layer, including toasts.
     this.transitions = new TransitionService(this.root);
+
+    // Hand the ornament mask URLs to CSS, which cannot resolve BASE_URL itself.
+    publishOrnaments();
 
     window.addEventListener('keydown', this.onKeyDown);
   }
@@ -129,10 +133,21 @@ export class UIManager {
     this.navigator?.update(dt);
   }
 
-  showToast(message: string, durationMs = 2500): void {
+  /**
+   * A transient notification.
+   *
+   * The icon is optional and deliberately so. Three things get toasted — a
+   * district lighting, a shard found, a delivery rated — and they are not the
+   * same kind of event: giving all three a badge would flatten that into one
+   * undifferentiated stream. An icon marks the collectible, which is the one a
+   * player scans for.
+   */
+  showToast(message: string, durationMs = 2500, iconName?: IconName): void {
     const toast = document.createElement('div');
-    toast.textContent = message;
     toast.style.cssText = [
+      'display:flex',
+      'align-items:center',
+      'gap:9px',
       'padding:10px 14px',
       'border-radius:8px',
       'background:rgba(28,32,50,.92)',
@@ -143,6 +158,15 @@ export class UIManager {
       'transform:translateY(-6px)',
       'transition:opacity var(--lp-fast) var(--lp-ease),transform var(--lp-fast) var(--lp-ease)',
     ].join(';');
+
+    if (iconName) toast.appendChild(icon(iconName, 16, 'var(--lp-lumen)'));
+
+    // A span, not `textContent` on the toast: assigning text to the parent
+    // would wipe the icon back out again.
+    const label = document.createElement('span');
+    label.textContent = message;
+    toast.appendChild(label);
+
     this.toastLayer.appendChild(toast);
 
     requestAnimationFrame(() => {

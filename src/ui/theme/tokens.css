@@ -138,6 +138,78 @@
   width: 100%;
 }
 
+/**
+ * Panel corner ornaments.
+ *
+ * Two corners, not four, and that is a choice rather than a limitation: the
+ * top-left and bottom-right pair is the classic bookplate framing, it reads as
+ * deliberate where four corners read as a border, and it costs two pseudo-
+ * elements — so every existing `.lp-panel` picks it up without a single screen
+ * having to build extra DOM.
+ *
+ * The mask URLs arrive as custom properties from `publishOrnaments()`, because
+ * a stylesheet cannot read BASE_URL.
+ */
+.lp-panel::before,
+.lp-panel::after {
+  content: "";
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  background-color: var(--lp-lumen);
+  opacity: 0.6;
+  pointer-events: none;
+  -webkit-mask-image: var(--lp-orn-corner);
+  mask-image: var(--lp-orn-corner);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
+.lp-panel::before {
+  top: 10px;
+  left: 10px;
+}
+
+.lp-panel::after {
+  bottom: 10px;
+  right: 10px;
+  transform: rotate(180deg);
+}
+
+/**
+ * A flourish under the panel heading, in place of a plain rule.
+ *
+ * `mask-size: 100% 100%` — stretched, not `contain`. The slicer pads every
+ * piece into a square so icons share an optical size, which is right for icons
+ * and wrong for a rule: `contain` fits that square into the line's height and
+ * leaves a 20-pixel stub. Stretching lets the ornament span the width it is
+ * meant to, and a divider is one of the few shapes that survives being pulled
+ * along its own axis.
+ */
+.lp-title::after {
+  content: "";
+  display: block;
+  width: 190px;
+  max-width: 100%;
+  height: 20px;
+  margin-top: var(--lp-space-1);
+  /* `--lp-rule` is a border colour: against a raised panel it is very nearly
+     the panel itself, and the ornament vanished. A rule you cannot see is not
+     restraint, it is a missing element. */
+  opacity: 0.75;
+  background-color: var(--lp-ink-faint);
+  -webkit-mask-image: var(--lp-orn-divider);
+  mask-image: var(--lp-orn-divider);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: left center;
+  mask-position: left center;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
 .lp-title {
   font-family: var(--lp-font-display);
   font-weight: 400;

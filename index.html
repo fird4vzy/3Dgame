@@ -56,8 +56,34 @@
         place-content: center;
         justify-items: center;
         gap: 18px;
-        background: var(--dusk);
+        /* The flat colour is listed *after* the image deliberately: it is the
+           fallback that paints on the very first frame, before a single byte of
+           the artwork has arrived. The whole point of an inline boot screen is
+           that it appears instantly, and a background-image that has to be
+           fetched first would give that away. The art fades in behind the text
+           when it lands, and nothing depends on it having landed. */
+        background:
+          image-set(url("/assets/ui/menu-key-art.webp") 1x) center / cover no-repeat,
+          var(--dusk);
         transition: opacity 0.5s ease;
+      }
+
+      /* Legibility over whatever part of the art the viewport happens to crop
+         to. Sits under the content, over the picture. */
+      #boot::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+          ellipse at center,
+          rgba(20, 23, 36, 0.94) 0%,
+          rgba(20, 23, 36, 0.86) 38%,
+          rgba(20, 23, 36, 0.6) 100%
+        );
+      }
+
+      #boot > * {
+        position: relative;
       }
       #boot.gone {
         opacity: 0;

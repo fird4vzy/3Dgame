@@ -64,8 +64,41 @@ const cells = await page.evaluate(
     const sheetCtx = sheetCanvas.getContext('2d', { willReadFrequently: true });
     sheetCtx.drawImage(img, 0, 0);
 
-    const fullW = Math.floor(img.width / nCols);
-    const fullH = Math.floor(img.height / nRows);
+    // Find the artwork before gridding it.
+    //
+    // Generators do not fill the canvas with the grid they were asked for: this
+    // sheet came back as three black panels in a band across the middle with
+    // large white margins above and below, so dividing the *whole image* into
+    // equal cells swept most of that white into every tile. Because luminance
+    // becomes alpha, white is maximally opaque — every icon came out as a solid
+    // block. Locating the dark region first and subdividing only that works for
+    // either layout without a per-sheet flag.
+    const whole = sheetCtx.getImageData(0, 0, img.width, img.height).data;
+    let dMinX = img.width;
+    let dMinY = img.height;
+    let dMaxX = -1;
+    let dMaxY = -1;
+    // Step in fours: this is a coarse region hunt, not a trace.
+    for (let y = 0; y < img.height; y += 4) {
+      for (let x = 0; x < img.width; x += 4) {
+        const i = (y * img.width + x) * 4;
+        const lum = (whole[i] * 0.299 + whole[i + 1] * 0.587 + whole[i + 2] * 0.114) / 255;
+        if (lum > 0.25) continue;
+        if (x < dMinX) dMinX = x;
+        if (y < dMinY) dMinY = y;
+        if (x > dMaxX) dMaxX = x;
+        if (y > dMaxY) dMaxY = y;
+      }
+    }
+
+    const found = dMaxX > dMinX && dMaxY > dMinY;
+    const originX = found ? dMinX : 0;
+    const originY = found ? dMinY : 0;
+    const regionW = found ? dMaxX - dMinX + 1 : img.width;
+    const regionH = found ? dMaxY - dMinY + 1 : img.height;
+
+    const fullW = Math.floor(regionW / nCols);
+    const fullH = Math.floor(regionH / nRows);
 
     // Bite a margin off every cell before reading it.
     //
@@ -84,8 +117,8 @@ const cells = await page.evaluate(
     for (let row = 0; row < nRows; row++) {
       for (let col = 0; col < nCols; col++) {
         const data = sheetCtx.getImageData(
-          col * fullW + padX,
-          row * fullH + padY,
+          originX + col * fullW + padX,
+          originY + row * fullH + padY,
           cellW,
           cellH,
         );
