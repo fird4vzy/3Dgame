@@ -32,8 +32,14 @@ export class MainMenuScreen implements UIScreen {
     const root = document.createElement('div');
     // `justify-content` (not justify-items) is what actually moves a single
     // grid child off centre.
+    // No `position` here. `.lp-screen` is already `position:absolute; inset:0`,
+    // and it is that which gives the backdrop below something to fill — setting
+    // `position:relative` inline overrides the class, drops the element back
+    // into flow, and collapses the screen to the height of its own text.
     root.style.cssText =
       'align-content:center;justify-content:start;padding-left:min(11vw,110px)';
+
+    root.append(this.backdrop(), this.scrim());
 
     const panel = document.createElement('div');
     panel.setAttribute('role', 'dialog');
@@ -108,6 +114,55 @@ export class MainMenuScreen implements UIScreen {
   /** Escape does nothing here — there is nowhere further back to go. */
   onBack(): boolean {
     return true;
+  }
+
+  /**
+   * Painted key art behind the title.
+   *
+   * The menu used to sit over the live 3D planet, which is a lovely idea and
+   * was not working: the orbital camera has no key light of its own, the ground
+   * fog swallowed the whole globe, and it read as a flat grey disc. Painted art
+   * shows the thing the menu is actually selling — one district alight, the rest
+   * of the little world still dark — at a quality the real-time renderer is not
+   * going to reach on a title screen.
+   *
+   * `object-position` is pinned right because the art is composed with its left
+   * third empty for exactly this text.
+   */
+  private backdrop(): HTMLElement {
+    const image = document.createElement('img');
+    image.src = `${import.meta.env.BASE_URL}assets/ui/menu-key-art.webp`;
+    image.alt = '';
+    image.setAttribute('aria-hidden', 'true');
+    image.className = 'lp-menu-art';
+    // `inset:0` does not stretch a replaced element — it needs explicit size.
+    // `object-position` lives in the stylesheet because it has to respond to
+    // aspect ratio, which inline styles cannot do.
+    image.style.cssText = [
+      'position:absolute',
+      'inset:0',
+      'width:100%',
+      'height:100%',
+      'object-fit:cover',
+      'z-index:-2',
+      'pointer-events:none',
+    ].join(';');
+    return image;
+  }
+
+  /**
+   * A scrim under the text.
+   *
+   * Even with the art's empty left third, a serif title over starfield is a
+   * contrast gamble at small window sizes. This costs nothing and makes the
+   * copy legible at every aspect ratio the art gets cropped to.
+   */
+  private scrim(): HTMLElement {
+    const scrim = document.createElement('div');
+    scrim.setAttribute('aria-hidden', 'true');
+    scrim.className = 'lp-menu-scrim';
+    scrim.style.cssText = 'position:absolute;inset:0;z-index:-1;pointer-events:none';
+    return scrim;
   }
 
   private button(

@@ -130,6 +130,8 @@ export class PlanetScene implements IScene {
   private lastDelta = 1 / 60;
   private menuMode = false;
   private menuOrbit = 0;
+  /** Ground fog, parked while the orbital menu shot is on screen. */
+  private gameFog: THREE.Fog | null = null;
 
   constructor(
     private readonly renderer: RendererService,
@@ -347,8 +349,13 @@ export class PlanetScene implements IScene {
     if (this.paused) return;
     this.world.lateUpdate(dt);
 
-    if (this.menuMode) this.updateMenuCamera(dt);
-    else this.rig.update(dt, this.controller.smoothedPosition);
+    if (this.menuMode) {
+      this.updateMenuCamera(dt);
+    } else {
+      // Put the ground fog back the moment play starts.
+      if (this.gameFog && !this.world.scene.fog) this.world.scene.fog = this.gameFog;
+      this.rig.update(dt, this.controller.smoothedPosition);
+    }
     this.cullBelowHorizon();
 
     if (this.character) {
@@ -938,6 +945,16 @@ export class PlanetScene implements IScene {
   private updateMenuCamera(dt: number): void {
     this.menuOrbit += dt * 0.06;
 
+    // Fog is scaled to the *ground* horizon — about 14 m. The menu camera sits
+    // 78 m off the surface, which puts the entire planet past `fog.far`, and it
+    // rendered as a flat grey disc with no terrain on it at all. An orbital
+    // shot has no atmosphere between it and the world, so it gets none.
+    const scene = this.world.scene;
+    if (scene.fog) {
+      this.gameFog = scene.fog as THREE.Fog;
+      scene.fog = null;
+    }
+
     const camera = this.renderer.camera;
     // Far enough that the whole planet sits in frame with sky around it — the
     // menu shot is selling "this world is small", so it has to fit.
@@ -951,6 +968,26 @@ export class PlanetScene implements IScene {
     // unlike gameplay, where up is local to the player's position.
     camera.up.set(0, 1, 0);
     camera.lookAt(0, 0, 0);
+
+    // Light the hemisphere we are actually looking at.
+    //
+    // The sun follows the *player*, who in menu mode is standing somewhere on
+    // the far side — so the face of the planet on screen had no key light at
+    // all and read as a flat disc. A three-quarter key from up and to the left
+    // of the camera gives the sphere a terminator, which is the only thing that
+    // makes a ball look like a world.
+    _sunUp.copy(camera.position).normalize();
+    _sunTangent.set(0, 1, 0).cross(_sunUp).normalize();
+    _sunDir
+      .copy(_sunUp)
+      .multiplyScalar(0.55)
+      .addScaledVector(_sunTangent, 0.7)
+      .addScaledVector(camera.up, 0.45)
+      .normalize();
+
+    this.sun.position.copy(_sunDir).multiplyScalar(PLANET_RADIUS * 3);
+    this.sun.target.position.set(0, 0, 0);
+    this.sun.target.updateMatrixWorld();
   }
 
   private syncCharacterAnimation(dt: number): void {

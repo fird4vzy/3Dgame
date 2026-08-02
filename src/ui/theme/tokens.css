@@ -46,6 +46,45 @@
   }
 }
 
+/**
+ * Menu key art.
+ *
+ * The art is composed 16:9 with its left third empty for the title. Crop it to
+ * a squarer window at a fixed `object-position` and that empty third is the
+ * first thing thrown away — the title lands on the lighthouse. So the crop
+ * window slides left as the viewport narrows, trading planet for breathing
+ * room, and the scrim gets steeper to cover what is left.
+ */
+.lp-menu-art {
+  object-position: 75% 50%;
+}
+
+.lp-menu-scrim {
+  background: linear-gradient(
+    100deg,
+    rgba(10, 13, 26, 0.92) 0%,
+    rgba(10, 13, 26, 0.78) 26%,
+    rgba(10, 13, 26, 0.35) 48%,
+    rgba(10, 13, 26, 0) 68%
+  );
+}
+
+@media (max-aspect-ratio: 4 / 3) {
+  .lp-menu-art {
+    object-position: 34% 50%;
+  }
+
+  .lp-menu-scrim {
+    background: linear-gradient(
+      170deg,
+      rgba(10, 13, 26, 0.9) 0%,
+      rgba(10, 13, 26, 0.72) 38%,
+      rgba(10, 13, 26, 0.2) 72%,
+      rgba(10, 13, 26, 0) 100%
+    );
+  }
+}
+
 .lp-screen {
   position: absolute;
   inset: 0;
