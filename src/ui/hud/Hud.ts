@@ -64,10 +64,11 @@ export class Hud {
         'opacity:0',
       ].join(';'),
     );
-    this.compassNeedle = el(
-      'div',
-      'font:600 18px/1 var(--lp-font-body);color:var(--lp-lumen);transition:transform 120ms ease',
-    );
+    // The needle was the "▲" character. A glyph is at the mercy of whatever
+    // font resolves, and its optical centre is not its bounding-box centre, so
+    // rotating it wobbled. A mask rotates about the middle of its own box.
+    this.compassNeedle = el('div', 'transition:transform 120ms ease;line-height:0');
+    this.compassNeedle.appendChild(icon('compass', 20, 'var(--lp-lumen)'));
     this.compassLabel = el(
       'div',
       'font:500 11px/1 var(--lp-font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--lp-ink-soft)',
@@ -118,18 +119,26 @@ export class Hud {
 
     // ── parcel indicator, bottom left ─────────────────────────────────────
     // Warmth is shown as the parcel's colour, never as a bar (Pillar 2).
+    //
+    // The dot is still what carries the warmth reading — a filled circle is a
+    // far better colour swatch than a detailed shape, because the eye judges
+    // hue by area. The parcel icon rides *inside* it as a mask in the ink
+    // colour, so the silhouette says "you are carrying something" while the
+    // colour behind it keeps saying how warm it still is.
     this.parcel = el(
       'div',
       [
         'position:absolute',
         'bottom:calc(18px + env(safe-area-inset-bottom))',
         'left:calc(18px + env(safe-area-inset-left))',
-        'width:34px;height:34px;border-radius:50%',
+        'width:38px;height:38px;border-radius:50%',
         'border:2px solid rgba(234,230,220,.25)',
+        'display:grid;place-items:center',
         'transition:background 400ms ease,box-shadow 400ms ease,opacity 250ms ease',
         'opacity:0',
       ].join(';'),
     );
+    this.parcel.appendChild(icon('parcel', 20, 'rgba(20,23,36,.78)'));
 
     // ── district banner ───────────────────────────────────────────────────
     this.district = el(
@@ -243,8 +252,9 @@ export class Hud {
     _right.copy(_up).cross(_forward).normalize();
 
     const angle = Math.atan2(_right.dot(_toTarget), _forward.dot(_toTarget));
+    // Rotation only. This used to also assign `textContent = '▲'` every frame,
+    // which now would delete the masked icon child on the first update.
     this.compassNeedle.style.transform = `rotate(${(angle * 180) / Math.PI}deg)`;
-    this.compassNeedle.textContent = '▲';
 
     const distance = walkingDistance(playerPosition, this.target);
     this.compassLabel.textContent =
@@ -270,5 +280,29 @@ export class Hud {
 function el(tag: string, cssText: string): HTMLElement {
   const element = document.createElement(tag);
   element.style.cssText = cssText;
+  return element;
+}
+
+/**
+ * A masked icon.
+ *
+ * The mask URL has to be set from script rather than in the stylesheet because
+ * it depends on `BASE_URL` — the game is served from a sub-path when deployed,
+ * and a hard-coded `/assets/...` in CSS silently resolves to the wrong place
+ * there while working perfectly in dev.
+ *
+ * `-webkit-` first: Safari still needs the prefix for mask-image, and it is a
+ * quarter of the mobile audience.
+ */
+function icon(name: string, size: number, colour = 'currentColor'): HTMLElement {
+  const element = document.createElement('span');
+  element.className = 'lp-icon';
+  element.setAttribute('aria-hidden', 'true');
+  element.style.width = `${size}px`;
+  element.style.height = `${size}px`;
+  element.style.backgroundColor = colour;
+  const url = `url(${import.meta.env.BASE_URL}assets/ui/icons/${name}.png)`;
+  element.style.setProperty('-webkit-mask-image', url);
+  element.style.setProperty('mask-image', url);
   return element;
 }

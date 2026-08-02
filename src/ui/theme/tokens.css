@@ -85,6 +85,27 @@
   }
 }
 
+/**
+ * Icons, as masks rather than pictures.
+ *
+ * The art is a white shape with an alpha channel, used as a `mask-image`, so
+ * the icon takes its colour from `background-color` — which means it inherits
+ * the design tokens, warms up with the illumination palette, and dims when a
+ * control is disabled. Ship the same icons as coloured PNGs and every one of
+ * those becomes a separate asset to regenerate.
+ */
+.lp-icon {
+  display: inline-block;
+  flex: none;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
 .lp-screen {
   position: absolute;
   inset: 0;
