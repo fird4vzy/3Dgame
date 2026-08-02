@@ -507,9 +507,26 @@ export class VrmCharacter implements LoadedCharacter {
       }
 
       this.rotate(`${side}UpperArm` as BoneName, S * shoulderPitch, 0, sign * out);
-      this.rotate(`${side}LowerArm` as BoneName, S * bend, 0, 0);
-      // A relaxed wrist, following the forearm a beat late.
-      this.rotate(`${side}Hand` as BoneName, S * bend * 0.25, 0, 0);
+
+      // The elbow hinges about the forearm's local **Y**, not X.
+      //
+      // This is why every previous attempt at a real elbow came out wrong. The
+      // shoulder gets away with X because `rotate` builds an XYZ Euler and
+      // three composes those as R = Rx·Ry·Rz — Z is applied *first*, so `out`
+      // has already swung the arm down out of the T-pose by the time the X term
+      // acts on it, and X then reads as a fore-aft swing.
+      //
+      // The forearm inherits that rotated frame, and its local X now points
+      // straight **along** the arm. Rotating about it does not flex the elbow
+      // at all; it twists the forearm along its own length. That is what the
+      // 1.45 rad "right angle" from the reference actually did, and why it
+      // produced a rigid Naruto pose instead of a fold.
+      //
+      // Y is the axis perpendicular to both, so it is the hinge. Mirrored per
+      // side, because the two elbows fold towards each other.
+      this.rotate(`${side}LowerArm` as BoneName, 0, sign * bend, 0);
+      // A relaxed wrist, following the forearm a beat late — same axis.
+      this.rotate(`${side}Hand` as BoneName, 0, sign * bend * 0.25, 0);
     };
 
     // The left arm swings against the left leg, so it shares its phase.
