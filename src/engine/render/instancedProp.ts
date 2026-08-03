@@ -67,6 +67,24 @@ export function flatten(root: THREE.Object3D): {
   // scale and the feet-anchoring offset that `styliseModel` applied.
   geometry.applyMatrix4(mesh.matrixWorld);
 
+  // Re-anchor on the *baked* geometry, which is the only thing that is
+  // actually drawn.
+  //
+  // `styliseModel` anchors the scene graph, and that is correct for a model
+  // added as a hierarchy — but instancing throws the hierarchy away and keeps
+  // only this geometry, and any node the traversal did not pick up, or any
+  // difference between the group's bounds and this mesh's own, survives as a
+  // vertical offset. In play that is a cat buried to its ankles and a torii
+  // hovering a hand's width off the grass. Measuring here removes a whole class
+  // of "why is it floating" by construction.
+  geometry.computeBoundingBox();
+  const minY = geometry.boundingBox?.min.y ?? 0;
+  if (Math.abs(minY) > 1e-4) {
+    geometry.translate(0, -minY, 0);
+    geometry.computeBoundingBox();
+  }
+  geometry.computeBoundingSphere();
+
   const material = Array.isArray(mesh.material) ? mesh.material[0]! : mesh.material;
   return { geometry, material };
 }

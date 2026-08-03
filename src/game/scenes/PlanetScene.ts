@@ -600,14 +600,29 @@ export class PlanetScene implements IScene {
 
       this.lampGroups.set(def.id, { district: def.id, lights, bulbs, delays });
 
+      // Everything solid this district has already claimed.
+      //
+      // Each prop set used to scatter in ignorance of the others, so with
+      // enough sets on the same ground a stone lantern ended up standing inside
+      // a cottage. One list, passed down and grown as each set places, is all
+      // the coordination this needs.
+      const taken: THREE.Vector3[] = [...positions];
+
       // District silhouettes — the landmarks the player navigates by, since the
       // horizon is only 13.5 m away and there is no map screen.
+      //
+      // 4 m apart: a cottage is about 4 m across, so this states "do not
+      // overlap" as a distance rather than as a hope.
       const propSpots = scatterAround(
         centre,
         def.id === 'spire' ? 18 : 30,
         def.radius * 0.85,
         def.id.length * 613 + 7,
+        undefined,
+        4,
+        taken,
       );
+      taken.push(...propSpots);
       for (const mesh of buildDistrictProps(def.id, propSpots, def.id.length * 331)) {
         this.world.scene.add(mesh);
         // Scenery has to block the camera, or it parks inside a rock.
@@ -625,7 +640,11 @@ export class PlanetScene implements IScene {
         def.id === 'spire' ? 8 : 14,
         def.radius * 1.15,
         def.id.length * 877 + 31,
+        undefined,
+        4.5,
+        taken,
       );
+      taken.push(...villageSpots);
       // Authored gates and lanterns, with the procedural stalls still carrying
       // the rest.
       //

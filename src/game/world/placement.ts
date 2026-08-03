@@ -50,6 +50,18 @@ export function scatterAround(
   angularRadiusDeg: number,
   seed: number,
   minAltitude = SEA_LEVEL_RADIUS + 0.4,
+  /**
+   * Metres that must separate this point from every point in `occupied`, and
+   * from the others this call places.
+   *
+   * Without it each prop set scatters in ignorance of the others, and with
+   * enough sets on the same ground you get a stone lantern standing inside a
+   * cottage. Rejection sampling is the right tool here: the counts are in the
+   * dozens, the attempt budget already exists, and anything cleverer would be
+   * solving a problem this world does not have.
+   */
+  minSeparation = 0,
+  occupied: THREE.Vector3[] = [],
 ): THREE.Vector3[] {
   const rng = makeRng(seed);
   const results: THREE.Vector3[] = [];
@@ -79,7 +91,20 @@ export function scatterAround(
 
     const height = PlanetTerrain.heightAt(direction);
     if (height < minAltitude) continue;
-    results.push(direction.multiplyScalar(height));
+
+    const point = direction.multiplyScalar(height);
+
+    if (minSeparation > 0) {
+      // Compared as a straight line rather than a great circle: at these
+      // distances on a 60 m sphere the two differ by millimetres, and the chord
+      // is a subtraction where the arc is an acos per candidate per neighbour.
+      const tooClose =
+        occupied.some((other) => other.distanceToSquared(point) < minSeparation * minSeparation) ||
+        results.some((other) => other.distanceToSquared(point) < minSeparation * minSeparation);
+      if (tooClose) continue;
+    }
+
+    results.push(point);
   }
 
   return results;
