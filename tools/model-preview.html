@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Imported model check</title>
+    <style>
+      body { margin: 0; background: #141724; color: #b3b8cd;
+             font: 13px/1.5 system-ui, sans-serif; }
+      canvas { display: block; }
+      pre { margin: 0; padding: 14px 18px; white-space: pre-wrap; }
+      .bad { color: #ff9a6a; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      /**
+       * Look at an imported model before trusting it.
+       *
+       * Open with ?model=assets/models/whatever.glb&height=3
+       *
+       * Four views against a metre grid and a stand-in for the player, because
+       * the two things that go wrong with a bought asset are scale and origin,
+       * and neither is visible without something known beside it. The readout
+       * underneath is the other half: triangle count and texture size decide
+       * whether an asset ships as-is or needs decimating, and eyeballing a
+       * model tells you nothing about either.
+       */
+      import * as THREE from 'three';
+      import { loadStylisedModel, describeModel } from '/src/engine/render/stylise.ts';
+
+      const params = new URLSearchParams(location.search);
+      const url = params.get('model') ?? '/assets/models/sample.glb';
+      const height = Number(params.get('height') ?? 2);
+
+      const W = 380, H = 460, VIEWS = 4;
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(1);
+      renderer.setSize(W * VIEWS, H);
+      renderer.shadowMap.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      const report = document.createElement('pre');
+      document.body.appendChild(report);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color('#1b2136');
+      scene.add(new THREE.AmbientLight(0x93a0c4, 1.6));
+      const key = new THREE.DirectionalLight(0xfff2e0, 2.2);
+      key.position.set(4, 7, 5);
+      scene.add(key);
+      scene.add(new THREE.DirectionalLight(0x8fb0ff, 0.8).translateX(-5));
+
+      // One-metre grid, and a 1.65 m post for human scale. Without these,
+      // "looks about right" is a guess.
+      scene.add(new THREE.GridHelper(12, 12, 0x50608f, 0x2b3454));
+      const post = new THREE.Mesh(
+        new THREE.BoxGeometry(0.35, 1.65, 0.2),
+        new THREE.MeshBasicMaterial({ color: 0x3b4570 }),
+      );
+      post.position.set(-1.6, 0.825, 0);
+      scene.add(post);
+
+      let model;
+      try {
+        model = await loadStylisedModel(url, { height, anchor: 'feet', harmonise: 0.12 });
+        scene.add(model);
+      } catch (error) {
+        report.innerHTML = `<span class="bad">could not load ${url}\n${error}</span>`;
+        window.__modelReady = true;
+        throw error;
+      }
+
+      const info = describeModel(model);
+      const warn = [];
+      if (info.triangles > 20000) warn.push('over 20k triangles — decimate before shipping');
+      if (info.materials > 4) warn.push(`${info.materials} materials — that is ${info.materials} draw calls per copy`);
+      if (info.textures.some((t) => Number(t.split('x')[0]) > 1024)) {
+        warn.push('texture larger than 1024 — downscale, this is a low-poly world');
+      }
+
+      report.innerHTML =
+        `${url}\n` +
+        `size  ${info.size.x} x ${info.size.y} x ${info.size.z} m   (asked for ${height} m tall)\n` +
+        `mesh  ${info.triangles} triangles, ${info.meshes} meshes, ${info.materials} materials\n` +
+        `tex   ${info.textures.join(', ') || 'none'}\n` +
+        (warn.length ? `<span class="bad">${warn.join('\n')}</span>` : 'nothing to flag');
+
+      const camera = new THREE.PerspectiveCamera(28, W / H, 0.05, 100);
+      const distance = Math.max(3.2, height * 2.4);
+      const angles = [0, Math.PI * 0.25, Math.PI * 0.5, Math.PI];
+
+      renderer.setScissorTest(true);
+      angles.forEach((a, i) => {
+        camera.position.set(Math.sin(a) * distance, height * 0.7, Math.cos(a) * distance);
+        camera.lookAt(0, height * 0.45, 0);
+        renderer.setViewport(i * W, 0, W, H);
+        renderer.setScissor(i * W, 0, W, H);
+        renderer.render(scene, camera);
+      });
+
+      window.__modelReady = true;
+    </script>
+  </body>
+</html>
