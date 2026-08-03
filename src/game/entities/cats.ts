@@ -1,205 +1,143 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { createToonMaterial } from '@engine/render/ToonMaterial';
 import { makeRng } from '@core/math/rng';
 import { PlanetTerrain } from '@game/world/PlanetTerrain';
+import { loadInstancedProp, orientToSurface } from '@engine/render/instancedProp';
 
 /**
  * Cats.
  *
  * A world can have buildings, lamps, grass and a sky and still feel abandoned,
- * because none of those things *do* anything. One small animal that turns its
- * head does more for the sense of a place being inhabited than another hundred
- * props would — it is the only thing on screen with an apparent will of its
- * own, and the eye goes straight to it.
+ * because none of those things *do* anything. One small animal that shifts its
+ * weight does more for the sense of a place being inhabited than another
+ * hundred props would — it is the only thing on screen with an apparent will of
+ * its own, and the eye goes straight to it.
  *
- * They are deliberately not simulated. There is no pathfinding, no state
- * machine and no collision: a cat sits where it was placed and shifts its
- * weight, flicks its tail and looks around on its own clock. That reads as
- * alive from three metres away, which is the only distance that matters, and
- * costs a handful of sines per frame.
+ * These were assembled from capsules and cones, which read as *a cat* by
+ * silhouette and could never read as *cute*: that lives in fur and eyes, and
+ * those are texture, not geometry. They are now an authored model.
  *
- * Each cat is one merged geometry in one instanced draw — but the *animation*
- * needs per-cat bones, so the tail and head are separate objects parented to a
- * shared body. Fifteen cats is fifteen small groups, which is nothing.
+ * **The animation had to change with the art.** A primitive cat had a head and
+ * a tail as separate objects, so it could flick and glance. An imported model
+ * is one rigid mesh with no bones, so nothing inside it can move on its own.
+ * Rather than fake a hierarchy by cutting the mesh up, this animates the whole
+ * body — breathing, a slow settle, and a deliberate turn to look at something
+ * — which is what a sitting cat does anyway, and it keeps all fifteen of them
+ * in a **single draw call** through one InstancedMesh.
+ *
+ * The trade is honest: no tail flick, and one draw call instead of forty-five.
  */
 
 interface Cat {
-  group: THREE.Group;
-  head: THREE.Object3D;
-  tail: THREE.Object3D;
-  /** Phase offset, so no two cats move together. */
+  position: THREE.Vector3;
+  /** Facing, in radians about the surface normal. */
+  yaw: number;
+  targetYaw: number;
+  /** Phase offset, so no two cats breathe together. */
   phase: number;
   /** How fidgety this one is. */
   restlessness: number;
-  /** Seconds until the next look-around. */
-  lookTimer: number;
-  lookTarget: number;
-  lookCurrent: number;
+  scale: number;
+  /** Seconds until it next decides to face somewhere else. */
+  turnTimer: number;
 }
 
-/** Coats, chosen per cat. Muted, to sit inside the palette. */
-const COATS = ['#3a3630', '#8a7a63', '#c6bcae', '#5d5348', '#2e2f36'];
-
-function buildBody(): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [];
-
-  const torso = new THREE.CapsuleGeometry(0.1, 0.2, 3, 7);
-  torso.rotateZ(Math.PI / 2);
-  torso.translate(0, 0.13, 0);
-  parts.push(torso);
-
-  // Front legs tucked, back legs folded — a sitting cat, which is the pose
-  // they hold for ninety per cent of the time anyone sees one.
-  for (const x of [-0.06, 0.06]) {
-    const leg = new THREE.CylinderGeometry(0.026, 0.03, 0.13, 5);
-    leg.translate(x, 0.065, 0.11);
-    parts.push(leg);
-  }
-  const haunch = new THREE.SphereGeometry(0.09, 7, 6);
-  haunch.scale(1, 0.85, 1.1);
-  haunch.translate(0, 0.09, -0.1);
-  parts.push(haunch);
-
-  return mergeGeometries(parts);
-}
-
-function buildHead(): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [];
-
-  const skull = new THREE.SphereGeometry(0.072, 8, 7);
-  skull.scale(1, 0.94, 1.02);
-  parts.push(skull);
-
-  const muzzle = new THREE.SphereGeometry(0.038, 6, 5);
-  muzzle.scale(1, 0.8, 1.1);
-  muzzle.translate(0, -0.018, 0.06);
-  parts.push(muzzle);
-
-  // Ears. Triangles, and they are most of what says "cat" at this size.
-  for (const x of [-0.042, 0.042]) {
-    const ear = new THREE.ConeGeometry(0.032, 0.062, 4);
-    ear.rotateY(Math.PI / 4);
-    ear.translate(x, 0.068, -0.004);
-    parts.push(ear);
-  }
-
-  return mergeGeometries(parts);
-}
+const _matrix = new THREE.Matrix4();
+const _scale = new THREE.Vector3();
 
 export class Cats {
   readonly group = new THREE.Group();
+  private mesh: THREE.InstancedMesh | null = null;
   private readonly cats: Cat[] = [];
   private time = 0;
 
-  /**
-   * @param spots  Surface positions to place cats at.
-   * @param seed   Deterministic placement and colouring.
-   */
-  constructor(spots: THREE.Vector3[], seed = 4242) {
+  constructor(private readonly spots: THREE.Vector3[], private readonly seed = 4242) {
     this.group.name = 'cats';
 
-    const bodyGeometry = buildBody();
-    const headGeometry = buildHead();
-    const tailGeometry = new THREE.CapsuleGeometry(0.018, 0.16, 3, 5);
-    // Origin at the base, so rotating the tail sweeps its tip rather than
-    // pivoting about its middle.
-    tailGeometry.translate(0, 0.09, 0);
-
     const rng = makeRng(seed);
-
     for (const spot of spots) {
-      const coat = COATS[Math.floor(rng() * COATS.length)] ?? COATS[0]!;
-      const material = createToonMaterial({ color: coat });
-
-      const group = new THREE.Group();
-      // Stand it on the surface, facing a random way around the local up.
-      const up = spot.clone().normalize();
-      group.position.copy(spot);
-      group.quaternion.copy(surfaceQuaternionAt(up, rng() * Math.PI * 2));
-
-      group.add(new THREE.Mesh(bodyGeometry, material));
-
-      const head = new THREE.Object3D();
-      head.position.set(0, 0.235, 0.13);
-      head.add(new THREE.Mesh(headGeometry, material));
-      group.add(head);
-
-      const tail = new THREE.Object3D();
-      tail.position.set(0, 0.14, -0.17);
-      tail.rotation.x = 0.7;
-      tail.add(new THREE.Mesh(tailGeometry, material));
-      group.add(tail);
-
-      this.group.add(group);
+      const yaw = rng() * Math.PI * 2;
       this.cats.push({
-        group,
-        head,
-        tail,
+        position: spot,
+        yaw,
+        targetYaw: yaw,
         phase: rng() * Math.PI * 2,
         restlessness: 0.6 + rng() * 0.9,
-        lookTimer: 1 + rng() * 5,
-        lookTarget: 0,
-        lookCurrent: 0,
+        scale: 0.9 + rng() * 0.3,
+        turnTimer: 2 + rng() * 6,
       });
     }
   }
 
   /**
-   * Breathing, a flicking tail, and the occasional glance.
+   * Load the art and build the instanced mesh.
    *
-   * The tail is the loudest of the three by a distance: it is the fastest thing
-   * on the animal and the only part that moves when nothing else does, so it is
-   * what reads as "alive" from across a square.
+   * Separate from the constructor because loading is async and the scene is
+   * assembled synchronously. A cat that never arrives is a missing cat, not a
+   * broken world — `loadInstancedProp` returns null rather than throwing.
+   */
+  async load(baseUrl = ''): Promise<void> {
+    this.mesh = await loadInstancedProp(
+      `${baseUrl}assets/models/cat.glb`,
+      this.spots,
+      this.seed,
+      {
+        // A cat is about 45 cm sitting. Getting this wrong is the single most
+        // obvious import error there is.
+        height: 0.45,
+        anchor: 'feet',
+        // Left alone: the model's own colours are the point of buying it, and
+        // this one already sits inside the palette.
+        harmonise: 0,
+        castShadow: true,
+        receiveShadow: true,
+      },
+    );
+    if (this.mesh) this.group.add(this.mesh);
+  }
+
+  /**
+   * Breathing, and the occasional decision to look somewhere else.
+   *
+   * The turn is what carries it. Breathing alone reads as an object with a
+   * wobble; a body that *changes where it is facing*, holds it, and later
+   * changes again reads as something making up its own mind.
    */
   update(dt: number): void {
-    this.time += dt;
+    const mesh = this.mesh;
+    if (!mesh) return;
 
-    for (const cat of this.cats) {
+    this.time += dt;
+    const follow = 1 - Math.exp(-2.4 * dt);
+
+    for (let i = 0; i < this.cats.length; i++) {
+      const cat = this.cats[i]!;
       const t = this.time * cat.restlessness + cat.phase;
 
-      // Breathing, in the body itself.
-      cat.group.scale.setScalar(1 + Math.sin(t * 1.6) * 0.012);
-
-      // Tail: a slow base sweep with a faster flick riding on it.
-      cat.tail.rotation.x = 0.7 + Math.sin(t * 0.9) * 0.14;
-      cat.tail.rotation.z = Math.sin(t * 2.3) * 0.34 + Math.sin(t * 5.1) * 0.08;
-
-      // A glance every few seconds, held, then released.
-      cat.lookTimer -= dt;
-      if (cat.lookTimer <= 0) {
-        cat.lookTimer = 2.5 + Math.random() * 6;
-        cat.lookTarget = (Math.random() - 0.5) * 1.5;
+      cat.turnTimer -= dt;
+      if (cat.turnTimer <= 0) {
+        cat.turnTimer = 3 + Math.random() * 7;
+        // A glance, not a spin: cats reorient by less than a right angle far
+        // more often than they turn around.
+        cat.targetYaw += (Math.random() - 0.5) * 1.6;
       }
-      cat.lookCurrent += (cat.lookTarget - cat.lookCurrent) * (1 - Math.exp(-3 * dt));
-      cat.head.rotation.y = cat.lookCurrent;
-      cat.head.rotation.x = Math.sin(t * 1.3) * 0.05;
+      cat.yaw += (cat.targetYaw - cat.yaw) * follow;
+
+      // Breathing, plus a slower settle that makes it look like weight is
+      // being shifted rather than the whole animal pulsing.
+      const breath = 1 + Math.sin(t * 1.6) * 0.014 + Math.sin(t * 0.43) * 0.008;
+      _scale.setScalar(cat.scale * breath);
+
+      _matrix.compose(cat.position, orientToSurface(cat.position, cat.yaw), _scale);
+      mesh.setMatrixAt(i, _matrix);
     }
+    mesh.instanceMatrix.needsUpdate = true;
   }
 
   dispose(): void {
-    this.group.traverse((object) => {
-      const mesh = object as THREE.Mesh;
-      mesh.geometry?.dispose?.();
-      const material = mesh.material as THREE.Material | undefined;
-      material?.dispose?.();
-    });
+    this.mesh?.geometry.dispose();
+    (this.mesh?.material as THREE.Material | undefined)?.dispose();
+    this.mesh = null;
   }
-}
-
-const _tangent = new THREE.Vector3();
-const _bitangent = new THREE.Vector3();
-const _basis = new THREE.Matrix4();
-const _quat = new THREE.Quaternion();
-
-/** Orientation whose +Y is the surface normal, with a yaw about it. */
-function surfaceQuaternionAt(up: THREE.Vector3, yaw: number): THREE.Quaternion {
-  _tangent.set(0, 1, 0).projectOnPlane(up);
-  if (_tangent.lengthSq() < 1e-6) _tangent.set(1, 0, 0).projectOnPlane(up);
-  _tangent.normalize().applyAxisAngle(up, yaw);
-  _bitangent.copy(up).cross(_tangent).normalize();
-  _basis.makeBasis(_bitangent, up, _tangent);
-  return _quat.setFromRotationMatrix(_basis);
 }
 
 /** Scatter cats near a set of district centres. */
@@ -220,6 +158,7 @@ export function catSpots(
       const t = new THREE.Vector3(0, 1, 0).projectOnPlane(up);
       if (t.lengthSq() < 1e-6) t.set(1, 0, 0).projectOnPlane(up);
       t.normalize().applyAxisAngle(up, angle);
+
       // Project back onto the terrain: the offset is a direction, and the
       // ground under it is at whatever height the noise says.
       const direction = centre.clone().addScaledVector(t, distance).normalize();

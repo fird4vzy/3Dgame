@@ -37,6 +37,7 @@ import { ParticleSystem } from '@engine/vfx/ParticleSystem';
 import { buildDistrictProps, buildLighthouse, buildVillageSet } from '@game/entities/districtProps';
 import { buildGroundCover } from '@game/entities/groundCover';
 import { Cats, catSpots } from '@game/entities/cats';
+import { loadInstancedProp } from '@engine/render/instancedProp';
 import { Skydome, createStarfield } from '@game/world/Skydome';
 import type { MinimapMarker } from '@game/world/mapMarkers';
 import { buildCourier, type RenRig } from '@game/entities/CourierCharacter';
@@ -625,10 +626,24 @@ export class PlanetScene implements IScene {
         def.radius * 1.15,
         def.id.length * 877 + 31,
       );
-      for (const mesh of buildVillageSet(villageSpots, def.id.length * 449)) {
+      // Authored gates and lanterns, with the procedural stalls still carrying
+      // the rest.
+      //
+      // Split three ways from one scatter so the mix stays deterministic and
+      // nothing lands on top of anything else. The imports are loaded without
+      // awaiting for the same reason the cats are: decoration must never hold
+      // up the first frame.
+      const forTorii = villageSpots.filter((_, i) => i % 5 === 0);
+      const forLantern = villageSpots.filter((_, i) => i % 5 === 1 || i % 5 === 2);
+      const forStall = villageSpots.filter((_, i) => i % 5 > 2);
+
+      for (const mesh of buildVillageSet(forStall, def.id.length * 449)) {
         this.world.scene.add(mesh);
         this.cameraOccluders.push(mesh);
       }
+
+      void this.addImportedProp('torii', forTorii, 3.6, def.id.length * 7717);
+      void this.addImportedProp('ishidoro', forLantern, 1.5, def.id.length * 331);
 
       // Ground cover: flowers, grass, mushrooms, pebbles. The world had trees
       // and lamps and bare ground between them, which reads as empty however
@@ -660,7 +675,14 @@ export class PlanetScene implements IScene {
       ),
     );
     this.world.scene.add(this.cats.group);
-    for (const cat of this.cats.group.children) this.cullables.push(cat);
+    // Loading is async and this build is not, so it is deliberately not
+    // awaited: the world is complete without cats, and a decorative asset must
+    // never hold up the first frame. They fade in when they arrive.
+    //
+    // No horizon culling on the group — it is one InstancedMesh now, and the
+    // instances span the planet, so culling the whole thing by its origin would
+    // blink every cat out at once.
+    void this.cats.load(import.meta.env.BASE_URL);
 
     // The Spire's lighthouse: tall enough to crest the horizon from outside its
     // own district, which is what makes the final delivery navigable.
@@ -1029,6 +1051,36 @@ export class PlanetScene implements IScene {
     this.sun.position.copy(_sunDir).multiplyScalar(PLANET_RADIUS * 3);
     this.sun.target.position.set(0, 0, 0);
     this.sun.target.updateMatrixWorld();
+  }
+
+  /**
+   * Scatter an imported model as one instanced draw.
+   *
+   * Fire-and-forget on purpose. Every caller is decoration, and a prop that
+   * fails to load should leave a gap in the scenery rather than an exception in
+   * the middle of world construction — `loadInstancedProp` already returns null
+   * instead of throwing, so this only has to handle the null.
+   */
+  private async addImportedProp(
+    name: string,
+    positions: THREE.Vector3[],
+    height: number,
+    seed: number,
+  ): Promise<void> {
+    const mesh = await loadInstancedProp(
+      `${import.meta.env.BASE_URL}assets/models/${name}.glb`,
+      positions,
+      seed,
+      { height, anchor: 'feet', scaleJitter: 0.12, harmonise: 0.08 },
+    );
+    if (!mesh) return;
+
+    this.world.scene.add(mesh);
+    // Instances span the planet, so the whole mesh must not be horizon-culled
+    // by its origin — that would blink every copy out at once. It still blocks
+    // the camera, which is what stops the rig parking inside a torii.
+    this.cameraOccluders.push(mesh);
+    this.rig?.addOccluders([mesh]);
   }
 
   private syncCharacterAnimation(dt: number): void {

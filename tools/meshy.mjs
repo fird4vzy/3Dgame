@@ -160,6 +160,18 @@ async function download(task, name) {
   const file = join(OUT_DIR, `${name}.glb`);
   writeFileSync(file, Buffer.from(await response.arrayBuffer()));
 
+  // Optimise before anyone can forget to.
+  //
+  // Meshy ships 2048 PNG maps, about 3 MB a model. Thirty props at that size
+  // is 90 MB of assets for a game whose whole JS bundle is under one, and the
+  // detail buys nothing: behind a cel shader and a screen-space outline a 2048
+  // map and a 512 map are indistinguishable past two metres. Making this a
+  // separate step people are told to run is making it a step people skip.
+  const { execFileSync } = await import('node:child_process');
+  execFileSync(process.execPath, [join(ROOT, 'tools', 'optimise-glb.mjs'), file, '512'], {
+    stdio: 'inherit',
+  });
+
   const mb = (readFileSync(file).length / 1024 / 1024).toFixed(2);
   console.log(`\nwrote public/assets/models/${name}.glb  (${mb} MB)`);
   console.log(
