@@ -148,7 +148,7 @@ export class Hud {
         'position:absolute',
         'left:50%;top:34%',
         'transform:translateX(-50%)',
-        'font:400 26px/1 var(--lp-font-display)',
+        'font:700 26px/1 var(--lp-font-display)',
         'letter-spacing:.06em',
         'color:var(--lp-ink)',
         'text-shadow:0 2px 18px rgba(0,0,0,.8)',

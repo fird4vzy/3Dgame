@@ -59,20 +59,22 @@ export class MainMenuScreen implements UIScreen {
     title.textContent = t('game.title');
     title.style.cssText = [
       'font-family:var(--lp-font-display)',
-      'font-weight:400',
+      'font-weight:700',
       'font-size:clamp(44px,7vw,76px)',
       'line-height:1',
       'letter-spacing:.02em',
       'margin:0',
       'color:var(--lp-ink)',
-      'text-shadow:0 4px 40px rgba(0,0,0,.75)',
+      // Outlined by offset copies, matching every other heading. A blur alone
+      // leaves a light serif floating over a starfield with nothing holding it.
+      'text-shadow:-3px 0 #14101c,3px 0 #14101c,0 -3px #14101c,0 3px #14101c,0 8px 26px rgba(0,0,0,.8)',
     ].join(';');
 
     const tagline = document.createElement('p');
     tagline.textContent = t('game.tagline');
     tagline.style.cssText = [
       'font-family:var(--lp-font-display)',
-      'font-style:italic',
+      'font-weight:500',
       'font-size:clamp(15px,1.7vw,19px)',
       'color:var(--lp-ink-soft)',
       'margin:0 0 var(--lp-space-5)',

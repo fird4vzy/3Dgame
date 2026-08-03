@@ -5,18 +5,50 @@
  * warms up as the planet lights, which ties the UI to the core hook rather than
  * floating above it (docs/10-ui-flow.md §10.5).
  */
+/**
+ * Display face.
+ *
+ * Palatino was the wrong instrument entirely — a European book serif on a game
+ * whose reference is chunky, outlined and hand-drawn. Weight and roundness are
+ * what carry that look, and no amount of styling around a bookish serif gets
+ * there. Self-hosted rather than linked: 30 KB, and a title screen that waits on
+ * a third-party font request is a title screen that flashes.
+ */
+@font-face {
+  font-family: "Lumen Display";
+  src: url("/assets/fonts/fredoka-latin.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --lp-dusk: #141724;
-  --lp-dusk-raised: #1c2032;
+  --lp-dusk-raised: #232842;
   --lp-dusk-sunk: #0f1220;
-  --lp-ink: #eae6dc;
-  --lp-ink-soft: #a5aac0;
-  --lp-ink-faint: #757b93;
-  --lp-rule: #2b3048;
-  --lp-lumen: #e8a33a;
-  --lp-lumen-bright: #f6bd60;
-  --lp-lumen-wash: rgba(232, 163, 58, 0.14);
-  --lp-danger: #c8582f;
+  --lp-ink: #f4efe4;
+  --lp-ink-soft: #b3b8cd;
+  --lp-ink-faint: #7d84a0;
+  --lp-rule: #363d5e;
+  --lp-lumen: #f0a52e;
+  --lp-lumen-bright: #ffc45c;
+  --lp-lumen-deep: #c97a1c;
+  --lp-lumen-wash: rgba(240, 165, 46, 0.16);
+  --lp-danger: #d85a2c;
+
+  /**
+   * The ink line.
+   *
+   * Everything in the reference sits behind a heavy dark outline — it is not a
+   * border in the CSS sense, it is the drawing. Sharing one token keeps the
+   * weight identical across buttons, panels and chips, which is most of what
+   * makes a set of controls look like one set.
+   */
+  --lp-outline: #14101c;
+  --lp-outline-w: 2.5px;
+  /* Hard offset shadow, no blur — a drawn drop shadow, not a soft one. */
+  --lp-lift: 0 4px 0 var(--lp-outline);
+  --lp-lift-pressed: 0 1px 0 var(--lp-outline);
 
   --lp-space-1: 4px;
   --lp-space-2: 8px;
@@ -32,8 +64,8 @@
   --lp-fast: 180ms;
   --lp-slow: 240ms;
 
-  --lp-font-display: "Palatino Linotype", Palatino, "Iowan Old Style", Georgia, serif;
-  --lp-font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --lp-font-display: "Lumen Display", system-ui, "Segoe UI", sans-serif;
+  --lp-font-body: "Lumen Display", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
   --lp-ui-scale: 1;
 }
@@ -127,13 +159,25 @@
   backdrop-filter: blur(8px) saturate(0.7);
 }
 
+/**
+ * A panel is a drawn card, not a div with a hairline.
+ *
+ * The heavy outline plus a hard offset shadow is what makes it sit *on* the
+ * scene rather than float in front of it, and the inset highlight along the top
+ * edge is the cheap trick that gives a flat fill a sense of thickness — the
+ * same one the reference uses on every one of its plates.
+ */
 .lp-panel {
   position: relative;
-  background: var(--lp-dusk-raised);
-  border: 1px solid var(--lp-rule);
+  background: linear-gradient(180deg, #2b3152 0%, var(--lp-dusk-raised) 55%, #1b2036 100%);
+  border: var(--lp-outline-w) solid var(--lp-outline);
   border-radius: var(--lp-radius);
   padding: var(--lp-space-5);
-  box-shadow: 0 20px 60px -30px rgba(0, 0, 0, 0.9);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.3),
+    0 6px 0 var(--lp-outline),
+    0 22px 46px -22px rgba(0, 0, 0, 0.95);
   max-width: 460px;
   width: 100%;
 }
@@ -210,12 +254,27 @@
   mask-size: 100% 100%;
 }
 
+/**
+ * Headings.
+ *
+ * Heavy, and outlined by a stack of text-shadows rather than by
+ * `-webkit-text-stroke` — a stroke is centred on the glyph edge and eats into
+ * the letterform, which at this weight closes up the counters. Four offset
+ * copies sit entirely *outside* it.
+ */
 .lp-title {
   font-family: var(--lp-font-display);
-  font-weight: 400;
-  font-size: 2rem;
-  letter-spacing: 0.02em;
+  font-weight: 700;
+  font-size: 2.1rem;
+  letter-spacing: 0.005em;
   margin: 0 0 var(--lp-space-2);
+  color: var(--lp-ink);
+  text-shadow:
+    -2px 0 var(--lp-outline),
+    2px 0 var(--lp-outline),
+    0 -2px var(--lp-outline),
+    0 2px var(--lp-outline),
+    0 4px 0 rgba(0, 0, 0, 0.45);
 }
 
 .lp-sub {
@@ -230,44 +289,83 @@
   gap: var(--lp-space-2);
 }
 
+/**
+ * Buttons, as drawn objects.
+ *
+ * Four things together make the reference's look, and dropping any one of them
+ * loses it:
+ *
+ * - a heavy dark outline, the same weight everywhere;
+ * - a vertical two-stop fill, lighter at the top, so the face reads as curved;
+ * - an inset highlight along the top edge and a shadow along the bottom, which
+ *   is what gives a flat rectangle thickness;
+ * - a **hard** offset shadow beneath, no blur — a drawn shadow, not a soft one.
+ *
+ * The press is the payoff: the button travels down by exactly the height of its
+ * own shadow, so it looks like a physical key bottoming out. That is why the
+ * transform and the shadow have to change together.
+ */
 .lp-btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--lp-space-3);
   /* 48px minimum touch target. */
-  min-height: 48px;
+  min-height: 50px;
   padding: 0 var(--lp-space-4);
-  border: 1px solid var(--lp-rule);
-  border-radius: var(--lp-radius-sm);
-  background: transparent;
+  border: var(--lp-outline-w) solid var(--lp-outline);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #333a5e 0%, #262c49 100%);
   color: var(--lp-ink);
   font: inherit;
-  font-weight: 550;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   cursor: pointer;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.1),
+    var(--lp-lift);
+  transform: translateY(0);
   transition:
     background var(--lp-fast) var(--lp-ease),
-    border-color var(--lp-fast) var(--lp-ease);
+    transform 90ms var(--lp-ease),
+    box-shadow 90ms var(--lp-ease);
 }
 
 .lp-btn:hover {
-  background: var(--lp-lumen-wash);
-  border-color: var(--lp-lumen);
+  background: linear-gradient(180deg, #3d456d 0%, #2e3555 100%);
+}
+
+.lp-btn:active {
+  transform: translateY(3px);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.08),
+    var(--lp-lift-pressed);
 }
 
 .lp-btn:focus-visible {
-  outline: 2px solid var(--lp-lumen);
-  outline-offset: 2px;
+  outline: 3px solid var(--lp-lumen-bright);
+  outline-offset: 3px;
 }
 
 .lp-btn--primary {
-  background: var(--lp-lumen);
-  border-color: var(--lp-lumen);
-  color: #241d13;
+  background: linear-gradient(180deg, var(--lp-lumen-bright) 0%, var(--lp-lumen) 52%, var(--lp-lumen-deep) 100%);
+  color: #2b1c08;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.18),
+    var(--lp-lift);
 }
 
 .lp-btn--primary:hover {
-  background: var(--lp-lumen-bright);
+  background: linear-gradient(180deg, #ffd486 0%, var(--lp-lumen-bright) 52%, var(--lp-lumen) 100%);
+}
+
+.lp-btn--primary:active {
+  transform: translateY(3px);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.45),
+    var(--lp-lift-pressed);
 }
 
 .lp-row {
@@ -286,6 +384,58 @@
 .lp-row input[type="range"] {
   width: 160px;
   accent-color: var(--lp-lumen);
+}
+
+/**
+ * The checkbox was the last system control left.
+ *
+ * One default white square in a panel of drawn objects is more conspicuous than
+ * ten unstyled controls would be, because everything around it establishes the
+ * rule it breaks. `appearance: none` plus the same outline, fill and hard
+ * shadow the buttons use puts it back in the set.
+ */
+.lp-row input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  border: var(--lp-outline-w) solid var(--lp-outline);
+  border-radius: 9px;
+  background: linear-gradient(180deg, #333a5e 0%, #262c49 100%);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.1),
+    0 3px 0 var(--lp-outline);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition:
+    background var(--lp-fast) var(--lp-ease),
+    transform 90ms var(--lp-ease);
+}
+
+.lp-row input[type="checkbox"]:checked {
+  background: linear-gradient(180deg, var(--lp-lumen-bright) 0%, var(--lp-lumen) 100%);
+}
+
+/* The tick is drawn, not a glyph — a font character would not centre. */
+.lp-row input[type="checkbox"]:checked::after {
+  content: "";
+  width: 13px;
+  height: 8px;
+  border-left: 3.5px solid var(--lp-outline);
+  border-bottom: 3.5px solid var(--lp-outline);
+  transform: rotate(-45deg) translate(1px, -2px);
+}
+
+.lp-row input[type="checkbox"]:active {
+  transform: translateY(2px);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.08);
+}
+
+.lp-row input[type="checkbox"]:focus-visible {
+  outline: 3px solid var(--lp-lumen-bright);
+  outline-offset: 3px;
 }
 
 .lp-hint {
