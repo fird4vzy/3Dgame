@@ -16,7 +16,8 @@
     "test:e2e": "node tests/e2e/smoke.mjs",
     "test:all": "npm run typecheck && npm run lint && npm run test && npm run build",
     "test:play": "node tests/e2e/playthrough.mjs",
-    "shoot:character": "node tools/shoot-character.mjs"
+    "shoot:character": "node tools/shoot-character.mjs",
+    "meshy": "node tools/meshy.mjs"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.5.5",
