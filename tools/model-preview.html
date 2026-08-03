@@ -86,13 +86,24 @@
         (warn.length ? `<span class="bad">${warn.join('\n')}</span>` : 'nothing to flag');
 
       const camera = new THREE.PerspectiveCamera(28, W / H, 0.05, 100);
-      const distance = Math.max(3.2, height * 2.4);
+
+      // Frame from the model's real bounds, not from the requested height.
+      //
+      // `height` is only the Y extent; a cottage is wider than it is tall, and
+      // a camera placed from Y alone crops it. Taking the largest dimension and
+      // dividing by the vertical FOV puts the whole thing in shot whatever
+      // shape it turns out to be, and aiming at the box centre rather than a
+      // fraction of the height stops it sitting half out of frame.
+      const span = Math.max(info.size.x, info.size.y, info.size.z);
+      const fov = (camera.fov * Math.PI) / 180;
+      const distance = (span / 2 / Math.tan(fov / 2)) * 1.5;
+      const aim = info.size.y / 2;
       const angles = [0, Math.PI * 0.25, Math.PI * 0.5, Math.PI];
 
       renderer.setScissorTest(true);
       angles.forEach((a, i) => {
-        camera.position.set(Math.sin(a) * distance, height * 0.7, Math.cos(a) * distance);
-        camera.lookAt(0, height * 0.45, 0);
+        camera.position.set(Math.sin(a) * distance, aim + span * 0.35, Math.cos(a) * distance);
+        camera.lookAt(0, aim, 0);
         renderer.setViewport(i * W, 0, W, H);
         renderer.setScissor(i * W, 0, W, H);
         renderer.render(scene, camera);

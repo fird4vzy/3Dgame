@@ -100,12 +100,30 @@ async function submitText(prompt) {
   const body = {
     mode: 'preview',
     prompt,
-    art_style: 'sculpture',
+    // The API accepts exactly one value here; anything else is a 400.
+    art_style: 'realistic',
     should_remesh: true,
     target_polycount: 4000,
     topology: 'triangle',
   };
   const result = await api('/v2/text-to-3d', { method: 'POST', body: JSON.stringify(body) });
+  return result.result ?? result.id;
+}
+
+/**
+ * Texture a finished preview.
+ *
+ * `preview` returns geometry only — untextured white. That is not a fault, it
+ * is how the two-stage flow works, and it is the single most confusing thing
+ * about this API: the first result looks broken when it is merely unfinished.
+ * A textured model is the entire reason to use a generator over primitives, so
+ * this always runs.
+ */
+async function submitRefine(previewTaskId) {
+  const result = await api('/v2/text-to-3d', {
+    method: 'POST',
+    body: JSON.stringify({ mode: 'refine', preview_task_id: previewTaskId }),
+  });
   return result.result ?? result.id;
 }
 
@@ -155,11 +173,25 @@ try {
   if (command === 'check') {
     await check();
   } else if (command === 'text') {
-    const [prompt, name] = args;
-    if (!prompt || !name) throw new Error('usage: node tools/meshy.mjs text "<prompt>" <name>');
-    const taskId = await submitText(prompt);
-    console.log(`submitted: ${taskId}`);
-    await download(await waitFor(taskId), name);
+    // Last argument is the name; everything before it is the prompt.
+    //
+    // `npm run` strips quotes on Windows, so a carefully quoted prompt arrives
+    // as loose words and a naive `[prompt, name]` destructure silently submits
+    // the single word "a" — which is what happened the first time this ran.
+    // Joining is not a workaround for a broken shell, it is how the command is
+    // actually typed.
+    if (args.length < 2) throw new Error('usage: npm run meshy text <prompt words> <name>');
+    const name = args[args.length - 1];
+    const prompt = args.slice(0, -1).join(' ');
+    console.log(`prompt: "${prompt}"`);
+    console.log(`name:   ${name}`);
+    const previewId = await submitText(prompt);
+    console.log(`preview:   ${previewId}`);
+    await waitFor(previewId);
+
+    const refineId = await submitRefine(previewId);
+    console.log(`refine:    ${refineId}`);
+    await download(await waitFor(refineId), name);
   } else if (command === 'status') {
     console.log(JSON.stringify(await status(args[0]), null, 1));
   } else if (command === 'fetch') {
