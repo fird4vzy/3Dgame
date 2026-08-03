@@ -392,7 +392,14 @@ export function buildLighthouse(): { group: THREE.Group; lamp: THREE.Mesh; light
   cap.position.y = 13.1;
   group.add(cap);
 
-  const light = new THREE.PointLight(0xf6e0b0, 0, 60, 2);
+  // Decay 1.25, not the physical 2 — and here it matters far more than it does
+  // on a street lamp.
+  //
+  // This light has to be seen from across a district *and* stood underneath.
+  // Under strict inverse-square that is a range of maybe 5 m to 50 m, a 100:1
+  // swing, and the intensity that reads from the far side turns anything
+  // standing at its foot into a white cut-out. Which is exactly what it did.
+  const light = new THREE.PointLight(0xf6e0b0, 0, 70, 1.25);
   light.position.y = 11.9;
   group.add(light);
 
