@@ -1167,12 +1167,13 @@ export class PlanetScene implements IScene {
       drag: 1.8,
     });
 
-    // She looks pleased about it. The clip is short and the expression system
-    // already holds and releases on its own.
-    (this.character as { setExpression?: (name: string, hold: number) => void })?.setExpression?.(
-      'happy',
-      1.6,
-    );
+    // She crouches down and reaches out.
+    //
+    // This is the channel the first version was missing. From behind — which
+    // is where the camera lives — a facial expression is invisible, so she
+    // stood bolt upright while a cat wobbled and the whole interaction read as
+    // a number changing.
+    (this.character as { petGesture?: () => void })?.petGesture?.();
 
     this.bus.emit('cat:petted', { index, friend: this.cats.isFriend(index) });
   }

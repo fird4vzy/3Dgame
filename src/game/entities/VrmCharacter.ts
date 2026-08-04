@@ -133,6 +133,9 @@ const S = -1;
  */
 const HIP = -S;
 
+/** How long the crouch-and-reach lasts, in seconds. */
+const PET_ANIM_SECONDS = 1.5;
+
 /** Rotation that brings a T-posed arm down to the side, about Z. */
 const ARM_DOWN = 1.25;
 
@@ -193,6 +196,10 @@ export class VrmCharacter implements LoadedCharacter {
   private fallSpeed = 0;
   /** Strength of the current landing absorb, 0..1. */
   private landForce = 0;
+  /** Seconds left in the crouch-and-reach. */
+  private petTime = 0;
+  /** Hip Z at rest, so the crouch can rock back over the heels. */
+  private hipRestZ = 0;
 
   private readonly prevForward = new THREE.Vector3();
   private hasPrevForward = false;
@@ -222,6 +229,7 @@ export class VrmCharacter implements LoadedCharacter {
     const hips = this.bones.get('hips');
     this.hipRestY = hips?.position.y ?? 0;
     this.hipRestX = hips?.position.x ?? 0;
+    this.hipRestZ = hips?.position.z ?? 0;
 
     // Measure the leg rather than assuming it. `hipAmplitude` inverts the
     // step-length relationship using this, so a mis-measured leg is a
@@ -428,6 +436,7 @@ export class VrmCharacter implements LoadedCharacter {
     this.poseArms(armAmp * this.effort, c);
     this.poseSpine(c, this.effort);
     this.poseLanding();
+    this.posePetting(dt);
     this.updateFace(dt);
 
     // Everything the VRM needs, **except** springbones.
@@ -741,6 +750,78 @@ export class VrmCharacter implements LoadedCharacter {
    * play the same crumple as a long drop; that mismatch is most of what made
    * landings look wrong even once the arc was right.
    */
+  /**
+   * Crouching down to pet something.
+   *
+   * The first version of petting moved the cat, threw some motes and set a
+   * facial expression — and from behind, which is where the camera lives, none
+   * of that was the *player*. She stood bolt upright while a cat wobbled. The
+   * body has to commit, or the interaction reads as a number changing.
+   *
+   * Four things at once, because a crouch is not one joint: the knees fold, the
+   * hips drop and rock back over the heels, the spine folds forward, and the
+   * near arm reaches out and down. Do only the knees and she squats like a
+   * gym instructor; do only the spine and she bows.
+   *
+   * Eased in and out on a half-sine so there is no snap at either end, and
+   * scaled by `weight` so it layers *over* whatever the gait was doing rather
+   * than replacing it — she can be petting while still settling from a walk.
+   */
+  private posePetting(dt: number): void {
+    if (this.petTime <= 0) return;
+    this.petTime = Math.max(0, this.petTime - dt);
+
+    const t = 1 - this.petTime / PET_ANIM_SECONDS;
+    // Rise, hold, fall. The hold is what makes it look deliberate rather than
+    // like a flinch.
+    const weight =
+      t < 0.25
+        ? Math.sin((t / 0.25) * Math.PI * 0.5)
+        : t < 0.7
+          ? 1
+          : Math.cos(((t - 0.7) / 0.3) * Math.PI * 0.5);
+
+    const knee = 1.15 * weight;
+    const thigh = 0.95 * weight;
+    const chain = HIP * thigh + S * knee;
+
+    for (const side of ['left', 'right'] as const) {
+      this.rotate(`${side}UpperLeg` as BoneName, HIP * thigh, 0, 0);
+      this.rotate(`${side}LowerLeg` as BoneName, S * knee, 0, 0);
+      // Sole stays flat: she is crouching, not standing on her toes.
+      this.rotate(`${side}Foot` as BoneName, -chain, 0, 0);
+    }
+
+    const hips = this.bones.get('hips');
+    if (hips) {
+      // Down, and back over the heels — a crouch that only goes down looks
+      // like the floor moved.
+      hips.position.y = this.hipRestY - 0.42 * weight;
+      hips.position.z = this.hipRestZ - 0.12 * weight;
+    }
+
+    this.rotate('spine', S * 0.45 * weight, 0, 0);
+    this.rotate('chest', S * 0.22 * weight, 0, 0);
+    // Head stays down on the cat rather than following the spine's fold, which
+    // is what makes her look *at* it.
+    this.rotate('neck', S * 0.3 * weight, 0, 0);
+
+    // The reaching arm. Forward and down, elbow softened.
+    this.rotate('rightUpperArm', S * -0.95 * weight, 0, -(ARM_DOWN + 0.12 - 0.5 * weight));
+    this.rotate('rightLowerArm', 0, -0.55 * weight, 0);
+    this.rotate('rightHand', 0, -0.2 * weight, 0);
+
+    // The other arm rests on the knee.
+    this.rotate('leftUpperArm', S * -0.35 * weight, 0, ARM_DOWN + 0.12 + 0.15 * weight);
+    this.rotate('leftLowerArm', 0, 0.9 * weight, 0);
+  }
+
+  /** Crouch down and reach out. Called when the player pets something. */
+  petGesture(): void {
+    this.petTime = PET_ANIM_SECONDS;
+    this.setExpression('happy', PET_ANIM_SECONDS + 0.6);
+  }
+
   private poseLanding(): void {
     if (this.clip !== 'land') return;
 
