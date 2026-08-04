@@ -55,6 +55,7 @@ const _position = new THREE.Vector3();
 const _quat = new THREE.Quaternion();
 const _tilt = new THREE.Quaternion();
 const _axisX = new THREE.Vector3(1, 0, 0);
+const _hiddenMatrix = new THREE.Matrix4();
 
 /** How long the delight from one pet lasts, in seconds. */
 const PET_DURATION = 1.4;
@@ -62,6 +63,8 @@ const PET_DURATION = 1.4;
 export class Cats {
   readonly group = new THREE.Group();
   private mesh: THREE.InstancedMesh | null = null;
+  /** The same cats with their eyes shut, shown while being petted. */
+  private happyMesh: THREE.InstancedMesh | null = null;
   private readonly cats: Cat[] = [];
   private time = 0;
 
@@ -93,23 +96,40 @@ export class Cats {
    * broken world — `loadInstancedProp` returns null rather than throwing.
    */
   async load(baseUrl = ''): Promise<void> {
-    this.mesh = await loadInstancedProp(
-      `${baseUrl}assets/models/cat.glb`,
-      this.spots,
-      this.seed,
-      {
-        // A cat is about 45 cm sitting. Getting this wrong is the single most
-        // obvious import error there is.
-        height: 0.45,
-        anchor: 'feet',
-        // Left alone: the model's own colours are the point of buying it, and
-        // this one already sits inside the palette.
-        harmonise: 0,
-        castShadow: true,
-        receiveShadow: true,
-      },
-    );
-    if (this.mesh) this.group.add(this.mesh);
+    const options = {
+      // A cat is about 45 cm sitting. Getting this wrong is the single most
+      // obvious import error there is.
+      height: 0.45,
+      anchor: 'feet' as const,
+      // Left alone: the model's own colours are the point of buying it, and
+      // this one already sits inside the palette.
+      harmonise: 0,
+      castShadow: true,
+      receiveShadow: true,
+    };
+
+    // Two models, one per expression.
+    //
+    // A rigid mesh has no blendshapes and no bones, so its face cannot change —
+    // the expression is painted into the texture. Body language alone got the
+    // *feeling* across, but a cat being petted with its eyes wide open is still
+    // a cat that has not reacted, and that was the honest limit of the previous
+    // pass.
+    //
+    // So there are two: eyes open, and eyes squeezed shut mid-purr. Same
+    // colours, same collar, same bell. Both are instanced over the same spots,
+    // and `update` writes a zero scale into whichever one should not be seen —
+    // a degenerate instance costs nothing and needs no per-instance visibility,
+    // which InstancedMesh does not have.
+    const [calm, happy] = await Promise.all([
+      loadInstancedProp(`${baseUrl}assets/models/cat.glb`, this.spots, this.seed, options),
+      loadInstancedProp(`${baseUrl}assets/models/cat_happy.glb`, this.spots, this.seed, options),
+    ]);
+
+    this.mesh = calm;
+    this.happyMesh = happy;
+    if (calm) this.group.add(calm);
+    if (happy) this.group.add(happy);
   }
 
   /**
@@ -195,9 +215,26 @@ export class Cats {
       }
 
       _matrix.compose(_position, _quat, _scale);
-      mesh.setMatrixAt(i, _matrix);
+
+      // Show exactly one face.
+      //
+      // The expression flips a beat *before* the delight fades, not with it: a
+      // cat whose eyes snap open the instant the hand stops looks startled.
+      // Holding the squint slightly longer than the body movement is what makes
+      // it read as contentment trailing off.
+      const showHappy = cat.happy > PET_DURATION * 0.12;
+      const shown = showHappy ? this.happyMesh : mesh;
+      const hidden = showHappy ? mesh : this.happyMesh;
+
+      shown?.setMatrixAt(i, _matrix);
+      if (hidden) {
+        _hiddenMatrix.makeScale(0, 0, 0);
+        hidden.setMatrixAt(i, _hiddenMatrix);
+      }
     }
+
     mesh.instanceMatrix.needsUpdate = true;
+    if (this.happyMesh) this.happyMesh.instanceMatrix.needsUpdate = true;
   }
 
   /** Yaw about the local up that faces this cat at a world point. */
@@ -240,9 +277,12 @@ export class Cats {
   }
 
   dispose(): void {
-    this.mesh?.geometry.dispose();
-    (this.mesh?.material as THREE.Material | undefined)?.dispose();
+    for (const mesh of [this.mesh, this.happyMesh]) {
+      mesh?.geometry.dispose();
+      (mesh?.material as THREE.Material | undefined)?.dispose();
+    }
     this.mesh = null;
+    this.happyMesh = null;
   }
 }
 
