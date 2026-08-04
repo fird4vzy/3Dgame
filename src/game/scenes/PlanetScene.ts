@@ -623,10 +623,36 @@ export class PlanetScene implements IScene {
         taken,
       );
       taken.push(...propSpots);
-      for (const mesh of buildDistrictProps(def.id, propSpots, def.id.length * 331)) {
-        this.world.scene.add(mesh);
-        // Scenery has to block the camera, or it parks inside a rock.
-        this.cameraOccluders.push(mesh);
+
+      // Authored Japanese architecture, where the district has buildings.
+      //
+      // The Landing and Bramblewood were rows of boxes with cone roofs. Four
+      // types rather than one, and split from a single scatter so the mix is
+      // deterministic and the separation already computed above still holds —
+      // a village reads as a village because the buildings *differ*, not
+      // because there are many of them.
+      //
+      // The Coil and Tidebreak keep their procedural pipes and boardwalks:
+      // those are the silhouettes that tell you which district you are in, and
+      // replacing them with houses would flatten five places into one.
+      const HOUSES: Array<[string, number]> = [
+        ['minka', 4.6],
+        ['machiya', 4.2],
+        ['noren', 3.4],
+        ['shrine', 3.8],
+      ];
+
+      if (def.id === 'landing' || def.id === 'bramblewood') {
+        HOUSES.forEach(([name, height], slot) => {
+          const spots = propSpots.filter((_, i) => i % HOUSES.length === slot);
+          void this.addImportedProp(name, spots, height, def.id.length * 1300 + slot * 97);
+        });
+      } else {
+        for (const mesh of buildDistrictProps(def.id, propSpots, def.id.length * 331)) {
+          this.world.scene.add(mesh);
+          // Scenery has to block the camera, or it parks inside a rock.
+          this.cameraOccluders.push(mesh);
+        }
       }
 
       // Village fittings, in every district including the Spire.

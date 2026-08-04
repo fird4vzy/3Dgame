@@ -42,7 +42,9 @@ export const tuning = {
     armLength: 4.5,
     /** Zoom limits. 1.1 m is close enough to read a face without clipping it. */
     minArmLength: 1.1,
-    maxArmLength: 11,
+    maxArmLength: 8,
+    /** Metres the camera must stay above the terrain under it. */
+    groundClearance: 0.9,
     glideArmLength: 6.5,
     heightOffset: 1.5,
     /** Critically damped spring frequency for position follow. */

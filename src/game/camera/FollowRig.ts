@@ -3,6 +3,7 @@ import type { InputManager } from '@engine/input/InputManager';
 import type { BvhWorld } from '@engine/physics/BvhWorld';
 import { tuning } from '@config/tuning';
 import { clamp } from '@core/math/spherical';
+import { PlanetTerrain } from '@game/world/PlanetTerrain';
 
 const _up = new THREE.Vector3();
 const _prevUp = new THREE.Vector3();
@@ -14,6 +15,7 @@ const _dir = new THREE.Vector3();
 const _target = new THREE.Vector3();
 const _desired = new THREE.Vector3();
 const _toCamera = new THREE.Vector3();
+const _camUp = new THREE.Vector3();
 
 /**
  * Third-person spring-arm rig for a spherical world.
@@ -155,6 +157,7 @@ export class FollowRig {
     this.buildTarget(playerPosition);
     this.computeDesired(_target);
     this.resolveOcclusion(_target, dt);
+    this.keepAboveGround();
 
     // Critically damped spring: no overshoot, no wobble, frame-rate independent.
     const omega = tuning.camera.positionOmega;
@@ -172,6 +175,30 @@ export class FollowRig {
     // `up` must be the *local* up, or the camera rolls as the player walks.
     this.camera.up.copy(_up);
     this.camera.lookAt(_target);
+  }
+
+  /**
+   * Never let the camera end up underground.
+   *
+   * Occlusion handles things *between* the camera and the player. It cannot
+   * handle the camera being below the surface entirely, which on a world this
+   * small is not an edge case: the horizon from eye height is 13.9 m, the arm
+   * swings back along a straight line, and the ground curves up away from that
+   * line — so past about eight metres the camera simply sinks through the
+   * planet and you are looking at the village from inside the crust.
+   *
+   * Solved by raising the camera along its own local up rather than by
+   * shortening the arm, because shortening fights the zoom the player just
+   * asked for. The framing lifts instead, which reads as a crane shot.
+   */
+  private keepAboveGround(): void {
+    _camUp.copy(_desired).normalize();
+    const surface = PlanetTerrain.heightAt(_camUp);
+    const minimum = surface + tuning.camera.groundClearance;
+    const radius = _desired.length();
+    if (radius < minimum) {
+      _desired.copy(_camUp).multiplyScalar(minimum);
+    }
   }
 
   /** Register scenery the camera should pull in front of. */

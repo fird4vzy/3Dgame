@@ -163,9 +163,22 @@ export function styliseModel(root: THREE.Object3D, options: StyliseOptions = {})
     -_centre.z,
   );
 
+  // The bounding box is in **world** units; a child's position is in the
+  // root's local space. After the rescale above those two differ by exactly
+  // the root's scale, so applying a world-space shift to a local position
+  // under-corrects by that factor.
+  //
+  // On a model scaled to 0.46 that left a farmhouse hovering six and a half
+  // metres in the air, and it only showed up because the instanced path
+  // re-anchors on the baked geometry and therefore looked right in game while
+  // the preview tool looked wrong. A tool that disagrees with the game is
+  // worse than no tool.
+  shift.divide(root.scale);
+
   if (shift.lengthSq() > 1e-8) {
     for (const child of root.children) child.position.add(shift);
   }
+  root.updateWorldMatrix(true, true);
 
   return root;
 }

@@ -70,6 +70,7 @@
         throw error;
       }
 
+      window.__previewModel = model;
       const info = describeModel(model);
       const warn = [];
       if (info.triangles > 20000) warn.push('over 20k triangles — decimate before shipping');
