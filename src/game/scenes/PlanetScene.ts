@@ -342,7 +342,7 @@ export class PlanetScene implements IScene {
     this.updateCharacterTint();
     this.updateVillagers(dt);
     this.terrain.update(dt);
-    this.cats?.update(dt);
+    this.cats?.update(dt, this.player.object3D.position);
     this.updateFireflies(dt);
     this.updateParcelVisual(dt);
     this.updateLighthouse();
@@ -702,6 +702,7 @@ export class PlanetScene implements IScene {
     // instances span the planet, so culling the whole thing by its origin would
     // blink every cat out at once.
     void this.cats.load(import.meta.env.BASE_URL);
+    this.registerCats();
 
     // The Spire's lighthouse: tall enough to crest the horizon from outside its
     // own district, which is what makes the final delivery navigable.
@@ -1070,6 +1071,70 @@ export class PlanetScene implements IScene {
     this.sun.position.copy(_sunDir).multiplyScalar(PLANET_RADIUS * 3);
     this.sun.target.position.set(0, 0, 0);
     this.sun.target.updateMatrixWorld();
+  }
+
+  /**
+   * Make every cat something you can crouch down to.
+   *
+   * Registered immediately rather than after the model loads, because the
+   * interaction is about the *place* a cat occupies, not about its art having
+   * arrived — and a prompt that appears a beat late for no visible reason is
+   * worse than one that is simply there.
+   *
+   * The radius is deliberately smaller than an NPC's. You should have to walk
+   * up to a cat.
+   */
+  private registerCats(): void {
+    const cats = this.cats;
+    if (!cats) return;
+
+    for (const { index, position } of cats.positions()) {
+      this.interaction.register({
+        id: `cat:${index}`,
+        position,
+        radius: 1.8,
+        prompt: 'Pet',
+        enabled: true,
+        onInteract: () => this.petCat(index, position),
+      });
+    }
+  }
+
+  /**
+   * Pet a cat.
+   *
+   * Three channels at once, which is what makes a small interaction land: the
+   * animal reacts, the world says something, and the player's own body
+   * acknowledges it. Any one alone reads as a stat changing.
+   */
+  private petCat(index: number, position: THREE.Vector3): void {
+    if (!this.cats?.pet(index)) return;
+
+    _emitUp.copy(position).normalize();
+    _emitPos.copy(position).addScaledVector(_emitUp, 0.35);
+
+    // Warm motes rather than hearts: the whole game speaks in light, and a
+    // heart icon would be the one place it borrowed someone else's vocabulary.
+    this.particles.emit({
+      position: _emitPos,
+      count: 12,
+      colour: SHARD_COLOUR,
+      speed: [0.4, 1.1],
+      life: [0.5, 1.0],
+      size: [0.03, 0.07],
+      direction: _emitUp,
+      spread: 1.1,
+      drag: 1.8,
+    });
+
+    // She looks pleased about it. The clip is short and the expression system
+    // already holds and releases on its own.
+    (this.character as { setExpression?: (name: string, hold: number) => void })?.setExpression?.(
+      'happy',
+      1.6,
+    );
+
+    this.bus.emit('cat:petted', { index, friend: this.cats.isFriend(index) });
   }
 
   /**

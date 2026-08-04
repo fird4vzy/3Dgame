@@ -24,6 +24,8 @@ export interface EventMap {
   'engine:contextLost': void;
   'engine:contextRestored': void;
   'viewport:resized': { width: number; height: number; dpr: number; portrait: boolean };
+  /** A cat was petted. `friend` is true from the second time onward. */
+  'cat:petted': { index: number; friend: boolean };
   'quality:changed': { tier: 'low' | 'medium' | 'high'; reason: 'auto' | 'user' };
 
   // ── assets & scenes ─────────────────────────────────────────────────────

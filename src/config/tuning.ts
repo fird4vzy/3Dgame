@@ -40,6 +40,9 @@ export const tuning = {
 
   camera: {
     armLength: 4.5,
+    /** Zoom limits. 1.1 m is close enough to read a face without clipping it. */
+    minArmLength: 1.1,
+    maxArmLength: 11,
     glideArmLength: 6.5,
     heightOffset: 1.5,
     /** Critically damped spring frequency for position follow. */

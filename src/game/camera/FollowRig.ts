@@ -44,6 +44,18 @@ export class FollowRig {
   private initialised = false;
 
   /**
+   * Player-chosen arm length, before occlusion has its say.
+   *
+   * Kept separate from `currentArm` on purpose. Occlusion *shortens* the arm
+   * when something gets in the way and lets it recover afterwards; if the zoom
+   * wrote to the same variable, every time you walked behind a hut the camera
+   * would forget the distance you had chosen and spring back to the default.
+   * This is the length the player asked for; `currentArm` is what the world
+   * currently permits.
+   */
+  private wantedArm: number = tuning.camera.armLength;
+
+  /**
    * Props the camera must not see through.
    *
    * The BVH holds only the terrain, so without this a rock, hut or tree
@@ -124,6 +136,21 @@ export class FollowRig {
       (tuning.camera.maxPitchDeg * Math.PI) / 180,
     );
 
+    // ── zoom ──────────────────────────────────────────────────────────────
+    //
+    // Multiplicative, not additive. A notch that removes a fixed number of
+    // metres is enormous up close and imperceptible far away; a constant
+    // *fraction* feels like the same gesture at every distance, which is why
+    // every camera that gets this right does it this way.
+    const zoom = this.input.consumeZoom();
+    if (zoom !== 0) {
+      this.wantedArm = clamp(
+        this.wantedArm * Math.pow(0.88, zoom),
+        tuning.camera.minArmLength,
+        tuning.camera.maxArmLength,
+      );
+    }
+
     // ── desired pose ──────────────────────────────────────────────────────
     this.buildTarget(playerPosition);
     this.computeDesired(_target);
@@ -176,7 +203,9 @@ export class FollowRig {
    * and the far wall would otherwise fill the screen.
    */
   private resolveOcclusion(target: THREE.Vector3, dt: number): void {
-    const full = tuning.camera.armLength;
+    // Recover toward what the player asked for, not the default — otherwise
+    // walking behind a hut silently resets their zoom.
+    const full = this.wantedArm;
     _toCamera.copy(_desired).sub(target);
     const distance = _toCamera.length();
     if (distance < 1e-4) return;

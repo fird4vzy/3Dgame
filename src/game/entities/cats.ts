@@ -39,10 +39,21 @@ interface Cat {
   scale: number;
   /** Seconds until it next decides to face somewhere else. */
   turnTimer: number;
+  /** Seconds of being pleased about something, counting down. */
+  happy: number;
+  /** How many times this one has been petted, so it can warm to you. */
+  pets: number;
 }
 
 const _matrix = new THREE.Matrix4();
 const _scale = new THREE.Vector3();
+const _up = new THREE.Vector3();
+const _forward = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const _toPoint = new THREE.Vector3();
+
+/** How long the delight from one pet lasts, in seconds. */
+const PET_DURATION = 1.4;
 
 export class Cats {
   readonly group = new THREE.Group();
@@ -64,6 +75,8 @@ export class Cats {
         restlessness: 0.6 + rng() * 0.9,
         scale: 0.9 + rng() * 0.3,
         turnTimer: 2 + rng() * 6,
+        happy: 0,
+        pets: 0,
       });
     }
   }
@@ -102,7 +115,7 @@ export class Cats {
    * wobble; a body that *changes where it is facing*, holds it, and later
    * changes again reads as something making up its own mind.
    */
-  update(dt: number): void {
+  update(dt: number, playerPosition?: THREE.Vector3): void {
     const mesh = this.mesh;
     if (!mesh) return;
 
@@ -113,24 +126,85 @@ export class Cats {
       const cat = this.cats[i]!;
       const t = this.time * cat.restlessness + cat.phase;
 
-      cat.turnTimer -= dt;
-      if (cat.turnTimer <= 0) {
-        cat.turnTimer = 3 + Math.random() * 7;
-        // A glance, not a spin: cats reorient by less than a right angle far
-        // more often than they turn around.
-        cat.targetYaw += (Math.random() - 0.5) * 1.6;
+      if (cat.happy > 0) cat.happy = Math.max(0, cat.happy - dt);
+
+      // A cat that has been petted watches you instead of the middle distance.
+      //
+      // This is the cheapest possible bond and it does an enormous amount: an
+      // animal that keeps facing you after you touched it reads as having
+      // *remembered*, where one that goes back to staring at the horizon reads
+      // as scenery that happened to have an animation on it.
+      const watching = playerPosition && (cat.happy > 0 || cat.pets > 0);
+      if (watching) {
+        cat.targetYaw = this.yawToward(cat, playerPosition);
+      } else {
+        cat.turnTimer -= dt;
+        if (cat.turnTimer <= 0) {
+          cat.turnTimer = 3 + Math.random() * 7;
+          // A glance, not a spin: cats reorient by less than a right angle far
+          // more often than they turn around.
+          cat.targetYaw += (Math.random() - 0.5) * 1.6;
+        }
       }
-      cat.yaw += (cat.targetYaw - cat.yaw) * follow;
+      cat.yaw += (cat.targetYaw - cat.yaw) * (watching ? follow * 1.6 : follow);
 
       // Breathing, plus a slower settle that makes it look like weight is
       // being shifted rather than the whole animal pulsing.
-      const breath = 1 + Math.sin(t * 1.6) * 0.014 + Math.sin(t * 0.43) * 0.008;
+      let breath = 1 + Math.sin(t * 1.6) * 0.014 + Math.sin(t * 0.43) * 0.008;
+
+      // Being petted: a quick squash-and-stretch that decays. Scale is all a
+      // rigid mesh has, so it has to carry the whole reaction — and a bounce
+      // that *overshoots* on the way back is what makes it read as delight
+      // rather than as a size change.
+      if (cat.happy > 0) {
+        const k = cat.happy / PET_DURATION;
+        breath += Math.sin(k * Math.PI * 3) * 0.09 * k;
+      }
       _scale.setScalar(cat.scale * breath);
 
       _matrix.compose(cat.position, orientToSurface(cat.position, cat.yaw), _scale);
       mesh.setMatrixAt(i, _matrix);
     }
     mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /** Yaw about the local up that faces this cat at a world point. */
+  private yawToward(cat: Cat, point: THREE.Vector3): number {
+    const up = _up.copy(cat.position).normalize();
+    _forward.set(0, 1, 0).projectOnPlane(up);
+    if (_forward.lengthSq() < 1e-6) _forward.set(1, 0, 0).projectOnPlane(up);
+    _forward.normalize();
+    _right.copy(up).cross(_forward).normalize();
+
+    _toPoint.copy(point).sub(cat.position).projectOnPlane(up);
+    if (_toPoint.lengthSq() < 1e-8) return cat.yaw;
+    _toPoint.normalize();
+
+    return Math.atan2(_right.dot(_toPoint), _forward.dot(_toPoint));
+  }
+
+  /** Every cat, with its world position — for registering interactions. */
+  positions(): ReadonlyArray<{ index: number; position: THREE.Vector3 }> {
+    return this.cats.map((cat, index) => ({ index, position: cat.position }));
+  }
+
+  /** Whether this cat has been petted before. */
+  isFriend(index: number): boolean {
+    return (this.cats[index]?.pets ?? 0) > 0;
+  }
+
+  /**
+   * Pet one.
+   *
+   * Returns false if the index is wrong, so the caller can tell a real
+   * interaction from a stale one rather than silently doing nothing.
+   */
+  pet(index: number): boolean {
+    const cat = this.cats[index];
+    if (!cat) return false;
+    cat.happy = PET_DURATION;
+    cat.pets++;
+    return true;
   }
 
   dispose(): void {

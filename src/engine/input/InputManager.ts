@@ -86,7 +86,41 @@ export class InputManager {
     on(window, 'pointerup', this.onPointerUp as (e: Event) => void);
     on(window, 'pointercancel', this.onPointerUp as (e: Event) => void);
     on(this.target, 'contextmenu', (e) => e.preventDefault());
+
+    // Zoom. `passive: false` because this must call preventDefault — without
+    // it the browser scrolls the page behind the canvas while the camera also
+    // moves, which feels broken in a way players cannot describe.
+    on(this.target, 'wheel', this.onWheel as (e: Event) => void, { passive: false });
   }
+
+  /**
+   * Accumulated zoom intent since the last read, in notches.
+   *
+   * Accumulated rather than sampled because a wheel fires in bursts that do not
+   * line up with frames: reading "the last event" drops most of a fast flick
+   * and makes the zoom feel like it is ignoring you. Positive pulls the camera
+   * in.
+   */
+  private zoomAccumulator = 0;
+
+  /** Take the accumulated zoom and reset it. Call once per frame. */
+  consumeZoom(): number {
+    const value = this.zoomAccumulator;
+    this.zoomAccumulator = 0;
+    return value;
+  }
+
+  private onWheel = (event: WheelEvent): void => {
+    if (!this.enabled) return;
+    event.preventDefault();
+    this.device = 'keyboard';
+
+    // deltaMode 1 is lines, 2 is pages; normalising keeps a trackpad and a
+    // notched wheel roughly comparable instead of one being twenty times the
+    // other.
+    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1;
+    this.zoomAccumulator += (-event.deltaY * scale) / 100;
+  };
 
   dispose(): void {
     for (const off of this.disposers) off();
