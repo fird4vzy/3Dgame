@@ -807,13 +807,22 @@ export class VrmCharacter implements LoadedCharacter {
     this.rotate('neck', S * 0.3 * weight, 0, 0);
 
     // The reaching arm. Forward and down, elbow softened.
+    //
+    // **Elbow sign is mirrored per side** — the left arm folds on negative Y and
+    // the right on positive, which is why `poseArms` multiplies by `sign`.
+    // Writing the numbers directly here got both of them backwards and folded
+    // her forearms *outward*, which is exactly as bad as it sounds. Same trap as
+    // the original elbow bug, one level down.
+    const LEFT = 1;
+    const RIGHT = -1;
+
     this.rotate('rightUpperArm', S * -0.95 * weight, 0, -(ARM_DOWN + 0.12 - 0.5 * weight));
-    this.rotate('rightLowerArm', 0, -0.55 * weight, 0);
-    this.rotate('rightHand', 0, -0.2 * weight, 0);
+    this.rotate('rightLowerArm', 0, RIGHT * -0.55 * weight, 0);
+    this.rotate('rightHand', 0, RIGHT * -0.2 * weight, 0);
 
     // The other arm rests on the knee.
     this.rotate('leftUpperArm', S * -0.35 * weight, 0, ARM_DOWN + 0.12 + 0.15 * weight);
-    this.rotate('leftLowerArm', 0, 0.9 * weight, 0);
+    this.rotate('leftLowerArm', 0, LEFT * -0.9 * weight, 0);
   }
 
   /** Crouch down and reach out. Called when the player pets something. */

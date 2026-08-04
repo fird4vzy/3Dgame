@@ -51,6 +51,10 @@ const _up = new THREE.Vector3();
 const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _toPoint = new THREE.Vector3();
+const _position = new THREE.Vector3();
+const _quat = new THREE.Quaternion();
+const _tilt = new THREE.Quaternion();
+const _axisX = new THREE.Vector3(1, 0, 0);
 
 /** How long the delight from one pet lasts, in seconds. */
 const PET_DURATION = 1.4;
@@ -152,17 +156,43 @@ export class Cats {
       // being shifted rather than the whole animal pulsing.
       let breath = 1 + Math.sin(t * 1.6) * 0.014 + Math.sin(t * 0.43) * 0.008;
 
-      // Being petted: a quick squash-and-stretch that decays. Scale is all a
-      // rigid mesh has, so it has to carry the whole reaction — and a bounce
-      // that *overshoots* on the way back is what makes it read as delight
-      // rather than as a size change.
+      // Being petted.
+      //
+      // The first version was a 9% squash and it was invisible — a rigid mesh
+      // has only its transform, so if the reaction is subtle there is no
+      // reaction. This uses all three channels a matrix offers:
+      //
+      //  - **it hops.** Leaving the ground is the loudest thing a small
+      //    creature can do, and it is the part that actually reads at three
+      //    metres.
+      //  - **it squashes on landing**, not while rising, which is what turns a
+      //    vertical translation into weight.
+      //  - **it leans back** to look up at whoever is above it.
+      //
+      // Two hops, decaying, over the same window as her crouch.
+      let lift = 0;
+      let lean = 0;
       if (cat.happy > 0) {
         const k = cat.happy / PET_DURATION;
-        breath += Math.sin(k * Math.PI * 3) * 0.09 * k;
+        const bounce = Math.abs(Math.sin(k * Math.PI * 2));
+        lift = bounce * 0.16 * k;
+        // Squash hardest at the bottom of each hop.
+        breath += (1 - bounce) * 0.14 * k;
+        lean = k * 0.5;
       }
-      _scale.setScalar(cat.scale * breath);
 
-      _matrix.compose(cat.position, orientToSurface(cat.position, cat.yaw), _scale);
+      _scale.setScalar(cat.scale * breath);
+      _up.copy(cat.position).normalize();
+      _position.copy(cat.position).addScaledVector(_up, lift);
+
+      _quat.copy(orientToSurface(cat.position, cat.yaw));
+      if (lean > 0) {
+        // Tip back about its own right axis, so the chin comes up.
+        _tilt.setFromAxisAngle(_axisX, -lean);
+        _quat.multiply(_tilt);
+      }
+
+      _matrix.compose(_position, _quat, _scale);
       mesh.setMatrixAt(i, _matrix);
     }
     mesh.instanceMatrix.needsUpdate = true;

@@ -692,9 +692,15 @@ export class PlanetScene implements IScene {
       // nothing lands on top of anything else. The imports are loaded without
       // awaiting for the same reason the cats are: decoration must never hold
       // up the first frame.
-      const forTorii = villageSpots.filter((_, i) => i % 5 === 0);
-      const forLantern = villageSpots.filter((_, i) => i % 5 === 1 || i % 5 === 2);
-      const forStall = villageSpots.filter((_, i) => i % 5 > 2);
+      // **Exactly one torii per district.**
+      //
+      // There were three, which across five districts is fifteen gates on a
+      // planet you can walk around in four minutes — and a torii is a
+      // *threshold*. Fifteen of them is a fence, and a fence means nothing.
+      // One, standing at the edge of the settlement, is an entrance.
+      const forTorii = villageSpots.slice(0, 1);
+      const forLantern = villageSpots.filter((_, i) => i > 0 && i % 3 !== 0);
+      const forStall = villageSpots.filter((_, i) => i > 0 && i % 3 === 0);
 
       for (const mesh of buildVillageSet(forStall, def.id.length * 449)) {
         this.world.scene.add(mesh);
