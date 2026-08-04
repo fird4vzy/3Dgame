@@ -816,9 +816,15 @@ export class VrmCharacter implements LoadedCharacter {
     const LEFT = 1;
     const RIGHT = -1;
 
-    this.rotate('rightUpperArm', S * -0.95 * weight, 0, -(ARM_DOWN + 0.12 - 0.5 * weight));
-    this.rotate('rightLowerArm', 0, RIGHT * -0.55 * weight, 0);
-    this.rotate('rightHand', 0, RIGHT * -0.2 * weight, 0);
+    // `out` keeps its full value — *reducing* it lifts the arm sideways, which
+    // is what turned the reach into a straight horizontal pole. Reaching is
+    // pitch's job; `out` only ever decides how far from the ribs the arm hangs.
+    // A hand reaching down to an animal comes forward and *in*, not out.
+    const reach = ARM_DOWN + 0.12 + 0.2 * weight;
+    this.rotate('rightUpperArm', S * -0.72 * weight, 0, -reach);
+    // A real reach keeps a bend. A straight arm is a signpost.
+    this.rotate('rightLowerArm', 0, RIGHT * -0.75 * weight, 0);
+    this.rotate('rightHand', 0, RIGHT * -0.35 * weight, 0);
 
     // The other arm rests on the knee.
     this.rotate('leftUpperArm', S * -0.35 * weight, 0, ARM_DOWN + 0.12 + 0.15 * weight);

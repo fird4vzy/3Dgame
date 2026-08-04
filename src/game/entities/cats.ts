@@ -158,27 +158,28 @@ export class Cats {
 
       // Being petted.
       //
-      // The first version was a 9% squash and it was invisible — a rigid mesh
-      // has only its transform, so if the reaction is subtle there is no
-      // reaction. This uses all three channels a matrix offers:
+      // The first attempt was a 9% squash, which on a rigid mesh is no reaction
+      // at all. The second made it *hop* — visible, and wrong: a hop is a
+      // spring, and it turned the animal into a toy. That is the whole lesson
+      // here. Speed is what separates a creature from a mechanism, and the
+      // instinct to make a reaction louder by making it faster is exactly
+      // backwards.
       //
-      //  - **it hops.** Leaving the ground is the loudest thing a small
-      //    creature can do, and it is the part that actually reads at three
-      //    metres.
-      //  - **it squashes on landing**, not while rising, which is what turns a
-      //    vertical translation into weight.
-      //  - **it leans back** to look up at whoever is above it.
-      //
-      // Two hops, decaying, over the same window as her crouch.
+      // What a cat actually does when you touch it is **press into the hand**.
+      // So: it leans *toward* whoever is petting it, rises briefly onto its
+      // front paws, arches, and settles — slowly, on a single eased swell with
+      // no bounce anywhere in it.
       let lift = 0;
-      let lean = 0;
+      let pressToward = 0;
       if (cat.happy > 0) {
         const k = cat.happy / PET_DURATION;
-        const bounce = Math.abs(Math.sin(k * Math.PI * 2));
-        lift = bounce * 0.16 * k;
-        // Squash hardest at the bottom of each hop.
-        breath += (1 - bounce) * 0.14 * k;
-        lean = k * 0.5;
+        // One swell: in, hold, out. `k` runs 1 -> 0, so this peaks in the
+        // middle of the window and eases off both sides.
+        const swell = Math.sin((1 - k) * Math.PI);
+        lift = swell * 0.045;
+        // An arch, not a pulse — up through the shoulders as it presses.
+        breath += swell * 0.05;
+        pressToward = swell * 0.34;
       }
 
       _scale.setScalar(cat.scale * breath);
@@ -186,9 +187,10 @@ export class Cats {
       _position.copy(cat.position).addScaledVector(_up, lift);
 
       _quat.copy(orientToSurface(cat.position, cat.yaw));
-      if (lean > 0) {
-        // Tip back about its own right axis, so the chin comes up.
-        _tilt.setFromAxisAngle(_axisX, -lean);
+      if (pressToward > 0) {
+        // Tip *forward*, into the hand. Tipping back reads as recoiling — as
+        // an animal avoiding the touch, which is the opposite of the point.
+        _tilt.setFromAxisAngle(_axisX, pressToward);
         _quat.multiply(_tilt);
       }
 
