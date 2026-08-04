@@ -13,7 +13,12 @@ import { PLANET_RADIUS, PLAYER_HEIGHT } from '@config/constants';
 
 import { PlanetTerrain } from '@game/world/PlanetTerrain';
 import { DistrictRegistry } from '@game/world/DistrictRegistry';
-import { surfacePoint, surfaceQuaternion, scatterAround } from '@game/world/placement';
+import {
+  surfacePoint,
+  surfaceQuaternion,
+  scatterAround,
+  walkingDistance,
+} from '@game/world/placement';
 import { SphericalCharacterController } from '@game/components/SphericalCharacterController';
 import { GlideComponent } from '@game/components/GlideComponent';
 import { FollowRig } from '@game/camera/FollowRig';
@@ -43,6 +48,7 @@ import type { MinimapMarker } from '@game/world/mapMarkers';
 import { buildCourier, type RenRig } from '@game/entities/CourierCharacter';
 import { VILLAGER_SPECS } from '@game/entities/characterSpec';
 import { Fireflies } from '@game/world/Fireflies';
+import { Petals } from '@game/world/Petals';
 
 import { DISTRICTS, NPCS, npcById, type DistrictId, type ParcelWeight } from '../../data/content';
 
@@ -127,6 +133,7 @@ export class PlanetScene implements IScene {
   private villagerSway = 0;
   private cats: Cats | null = null;
   private fireflies!: Fireflies;
+  private petals!: Petals;
   private readonly firefliesColour = new THREE.Color();
 
   private parcelVisual: { group: THREE.Group; glow: THREE.PointLight; core: THREE.Mesh } | null =
@@ -344,6 +351,7 @@ export class PlanetScene implements IScene {
     this.terrain.update(dt);
     this.cats?.update(dt, this.player.object3D.position);
     this.updateFireflies(dt);
+    this.updatePetals(dt);
     this.updateParcelVisual(dt);
     this.updateLighthouse();
     this.updateSky();
@@ -471,6 +479,9 @@ export class PlanetScene implements IScene {
 
     this.fireflies = new Fireflies();
     scene.add(this.fireflies.mesh);
+
+    this.petals = new Petals();
+    scene.add(this.petals.mesh);
 
     scene.add(this.terrain.mesh);
     scene.add(this.terrain.water);
@@ -1290,6 +1301,31 @@ export class PlanetScene implements IScene {
   }
 
   /** Motes follow the player, and multiply as the district around them wakes. */
+  /**
+   * Blossom density from how much blossom is actually nearby.
+   *
+   * A constant drift would say the whole planet is in bloom, and the trees are
+   * in one district. Falling off with distance from Bramblewood means walking
+   * toward the wood is walking *into* the petals, which is the kind of thing
+   * that makes a place feel like somewhere rather than like a setting.
+   */
+  private updatePetals(dt: number): void {
+    const position = this.controller.smoothedPosition;
+    const wood = this.districts.all.find((d) => d.def.id === 'bramblewood');
+
+    let density = 0;
+    if (wood) {
+      const centre = surfacePoint(wood.def.centre, 0);
+      const distance = walkingDistance(position, centre);
+      // Full inside the wood, gone about two district-radii out.
+      const range = (wood.def.radius * Math.PI * PLANET_RADIUS) / 180;
+      density = THREE.MathUtils.clamp(1 - (distance - range) / (range * 1.6), 0, 1);
+    }
+
+    this.petals.setDensity(density);
+    this.petals.update(dt, position);
+  }
+
   private updateFireflies(dt: number): void {
     const runtime = this.districts.at(this.player.object3D.position);
     this.firefliesColour.set(runtime.def.litColour);
