@@ -133,8 +133,35 @@ async function status(taskId) {
 
 async function waitFor(taskId) {
   process.stdout.write(`task ${taskId} `);
+
+  // A poll that fails is not a job that failed.
+  //
+  // One dropped connection used to abandon a generation that was running
+  // perfectly well on the server — and since it had already been paid for,
+  // that is the worst possible way to lose one. Transient errors are retried;
+  // only a run of them gives up, and the task id is printed either way so the
+  // work can always be recovered with `fetch`.
+  let consecutiveErrors = 0;
+
   for (let attempt = 0; attempt < 240; attempt++) {
-    const task = await status(taskId);
+    let task;
+    try {
+      task = await status(taskId);
+      consecutiveErrors = 0;
+    } catch (error) {
+      consecutiveErrors++;
+      if (consecutiveErrors >= 6) {
+        throw new Error(
+          `lost contact after ${consecutiveErrors} tries: ${error.message}\n` +
+            `  -> the job may still be running. Recover it with:\n` +
+            `     node tools/meshy.mjs fetch ${taskId} <name>`,
+        );
+      }
+      process.stdout.write('?');
+      await sleep(8000);
+      continue;
+    }
+
     const state = task.status ?? task.state;
     if (state === 'SUCCEEDED') {
       console.log(' done');
@@ -146,7 +173,7 @@ async function waitFor(taskId) {
     process.stdout.write('.');
     await sleep(5000);
   }
-  throw new Error('timed out after 20 minutes');
+  throw new Error(`timed out after 20 minutes; recover with: fetch ${taskId} <name>`);
 }
 
 async function download(task, name) {
