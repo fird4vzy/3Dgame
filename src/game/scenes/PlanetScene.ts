@@ -642,9 +642,23 @@ export class PlanetScene implements IScene {
         ['shrine', 3.8],
       ];
 
+      // Bramblewood is a wood, so it gets trees rather than a second village.
+      //
+      // Three species, not one: a stand of identical trees reads as wallpaper,
+      // and the whole reason the old green spheres failed was that every one of
+      // them was the same sphere. Sakura carries the season, bamboo carries the
+      // verticals, and the maple breaks the pink up with something warm.
+      const TREES: Array<[string, number]> = [
+        ['sakura', 5.5],
+        ['bamboo', 4.5],
+        ['momiji', 4.5],
+      ];
+
+      const IMPORTS = def.id === 'bramblewood' ? TREES : HOUSES;
+
       if (def.id === 'landing' || def.id === 'bramblewood') {
-        HOUSES.forEach(([name, height], slot) => {
-          const spots = propSpots.filter((_, i) => i % HOUSES.length === slot);
+        IMPORTS.forEach(([name, height], slot) => {
+          const spots = propSpots.filter((_, i) => i % IMPORTS.length === slot);
           void this.addImportedProp(name, spots, height, def.id.length * 1300 + slot * 97);
         });
       } else {
