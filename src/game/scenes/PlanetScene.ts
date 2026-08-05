@@ -9,7 +9,7 @@ import type { MusicDirector } from '@engine/audio/MusicDirector';
 import type { IScene } from '@engine/scene/IScene';
 import type { LoadedCharacter } from '@engine/character/CharacterFactory';
 import { shouldBeVisible, horizonDistance } from '@core/math/spherical';
-import { PLANET_RADIUS, PLAYER_HEIGHT } from '@config/constants';
+import { PLANET_RADIUS, PLAYER_HEIGHT, SEA_LEVEL_RADIUS } from '@config/constants';
 
 import { PlanetTerrain } from '@game/world/PlanetTerrain';
 import { DistrictRegistry } from '@game/world/DistrictRegistry';
@@ -148,6 +148,11 @@ export class PlanetScene implements IScene {
   private menuOrbit = 0;
   /** Ground fog, parked while the orbital menu shot is on screen. */
   private gameFog: THREE.Fog | null = null;
+  /** Fog range before altitude scales it. See updateValleyFog. */
+  private fogBaseNear = 15;
+  private fogBaseFar = 76;
+  /** Smoothed 0.42..1.2 multiplier on that range. */
+  private fogOpenness = 1;
 
   constructor(
     private readonly renderer: RendererService,
@@ -352,6 +357,7 @@ export class PlanetScene implements IScene {
     this.cats?.update(dt, this.player.object3D.position);
     this.updateFireflies(dt);
     this.updatePetals(dt);
+    this.updateValleyFog(dt);
     this.updateParcelVisual(dt);
     this.updateLighthouse();
     this.updateSky();
@@ -1031,9 +1037,14 @@ export class PlanetScene implements IScene {
       // whole surface out to a flat pale sheet, which is what it did.
       this.skydome.horizonColour(fog.color, fraction).multiplyScalar(0.62);
       // Visibility opens up as the world lights: dusk hides the far side.
+      //
+      // Stored rather than written straight to the fog, because `updateValleyFog`
+      // scales these every frame and would otherwise be overwriting its own
+      // input — the classic way a per-frame modulation quietly becomes a
+      // runaway.
       const horizon = horizonDistance(PLANET_RADIUS, PLAYER_HEIGHT);
-      fog.near = horizon * (1.1 + fraction * 0.5);
-      fog.far = horizon * (5.5 + fraction * 2.5);
+      this.fogBaseNear = horizon * (1.1 + fraction * 0.5);
+      this.fogBaseFar = horizon * (5.5 + fraction * 2.5);
     }
 
     if (this.stars) {
@@ -1309,6 +1320,42 @@ export class PlanetScene implements IScene {
    * toward the wood is walking *into* the petals, which is the kind of thing
    * that makes a place feel like somewhere rather than like a setting.
    */
+  /**
+   * Mist gathers in the low ground.
+   *
+   * Driven by the player's altitude rather than by per-pixel height, and that
+   * is a deliberate trade worth stating. Real height fog needs the fog factor
+   * computed from each fragment's world Y, which on a sphere means every
+   * material in the scene getting a shader injection — and this world has toon
+   * materials, instanced props, imported models and a custom sky, so that is a
+   * modification in six places that all have to agree.
+   *
+   * What the player actually *feels* is "walking down into a valley fills the
+   * air". Scaling the existing linear fog by the camera's own altitude gives
+   * exactly that for two lines, works with every material automatically, and
+   * costs nothing. What it cannot do is show a bank of mist lying in a hollow
+   * seen from above — that is the real limitation, and it is worth the trade
+   * until something needs the view from the hill.
+   *
+   * Smoothed hard, because fog range is a whole-screen property: let it track
+   * altitude directly and a walk over uneven ground makes the entire image
+   * pulse.
+   */
+  private updateValleyFog(dt: number): void {
+    const fog = this.world.scene.fog as THREE.Fog | null;
+    if (!fog) return;
+
+    const altitude = this.controller.smoothedPosition.length() - SEA_LEVEL_RADIUS;
+    // Thickest at the waterline, gone by four metres up.
+    const openness = THREE.MathUtils.smoothstep(altitude, 0.2, 4.2);
+    const wanted = 0.42 + openness * 0.78;
+
+    this.fogOpenness += (wanted - this.fogOpenness) * (1 - Math.exp(-1.6 * dt));
+
+    fog.near = this.fogBaseNear * this.fogOpenness;
+    fog.far = this.fogBaseFar * this.fogOpenness;
+  }
+
   private updatePetals(dt: number): void {
     const position = this.controller.smoothedPosition;
     const wood = this.districts.all.find((d) => d.def.id === 'bramblewood');
