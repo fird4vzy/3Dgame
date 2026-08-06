@@ -63,6 +63,27 @@ export class Skydome {
         uMidLit: { value: new THREE.Color('#6f6b93') },
         uHorizonLit: { value: new THREE.Color('#c08a92') },
         uGlowLit: { value: new THREE.Color('#e8a87c') },
+
+        // Dawn — and it is the *reward*, not a clock.
+        //
+        // A real day/night cycle would fight this game rather than dress it.
+        // The whole premise is that the world is dark and light comes back
+        // because you carried it there; let morning arrive on a timer and every
+        // lamp you lit stops meaning anything, because the sun was going to do
+        // it anyway.
+        //
+        // So there is no cycle. There is a slow drift *within* dusk that keeps
+        // the sky from being a static backdrop, and a dawn that only begins to
+        // arrive once the planet is nearly lit — the last district you deliver
+        // to is the one that brings the morning.
+        uDawn: { value: 0 },
+        uZenithDawn: { value: new THREE.Color('#3c4a86') },
+        uMidDawn: { value: new THREE.Color('#a58bb4') },
+        uHorizonDawn: { value: new THREE.Color('#f0a9a0') },
+        uGlowDawn: { value: new THREE.Color('#ffd9a0') },
+
+        /** Seconds, for the drift. */
+        uTime: { value: 0 },
       },
       vertexShader: /* glsl */ `
         varying vec3 vWorldDirection;
@@ -83,6 +104,12 @@ export class Skydome {
         uniform vec3 uMidLit;
         uniform vec3 uHorizonLit;
         uniform vec3 uGlowLit;
+        uniform float uDawn;
+        uniform vec3 uZenithDawn;
+        uniform vec3 uMidDawn;
+        uniform vec3 uHorizonDawn;
+        uniform vec3 uGlowDawn;
+        uniform float uTime;
 
         varying vec3 vWorldDirection;
 
@@ -97,6 +124,14 @@ export class Skydome {
           vec3 horizon = mix(uHorizonDark, uHorizonLit, uIllumination);
           vec3 glow    = mix(uGlowDark,    uGlowLit,    uIllumination);
 
+          // Dawn rides on top of the restored palette rather than replacing
+          // it, so the last delivery *warms* the sky it already made rather
+          // than swapping in a different one.
+          zenith  = mix(zenith,  uZenithDawn,  uDawn);
+          mid     = mix(mid,     uMidDawn,     uDawn);
+          horizon = mix(horizon, uHorizonDawn, uDawn);
+          glow    = mix(glow,    uGlowDawn,    uDawn);
+
           // Three-stop gradient, eased so the transition sits low in the frame
           // rather than splitting the sky in half. Branchless: the two mixes
           // hand over at k = 0.58, and smoothstep keeps the seam invisible.
@@ -110,8 +145,17 @@ export class Skydome {
 
           // A warm band hugging the horizon, tightest and brightest once the
           // planet is lit. This is what reads as atmosphere.
-          float band = exp(-abs(height) * 5.5);
-          colour += glow * band * (0.45 + uIllumination * 0.75);
+          //
+          // The drift lives here rather than in the palette. A sun sitting just
+          // below the horizon does not change the *colour* of the sky minute to
+          // minute — it changes how tightly the glow hugs the edge and how far
+          // round it reaches, and moving those two is what makes a sky feel
+          // like weather rather than like a texture. Two periods that do not
+          // divide into each other, so the pattern never visibly repeats.
+          float breathe = sin(uTime * 0.021) * 0.5 + sin(uTime * 0.0083) * 0.5;
+          float tightness = 5.5 - breathe * 1.3;
+          float band = exp(-abs(height) * tightness);
+          colour += glow * band * (0.45 + uIllumination * 0.75 + breathe * 0.09);
 
           // Below the horizon the dome is mostly hidden by the planet, but a
           // sliver shows from hilltops; keep it dark so it reads as ground.
@@ -133,10 +177,21 @@ export class Skydome {
    * @param up            The player's local up vector.
    * @param illumination  0 = fully dark planet, 1 = every district lit.
    */
-  update(up: THREE.Vector3, illumination: number): void {
+  update(up: THREE.Vector3, illumination: number, elapsed = 0): void {
     _up.copy(up).normalize();
     (this.material.uniforms.uUp!.value as THREE.Vector3).copy(_up);
     this.material.uniforms.uIllumination!.value = illumination;
+    this.material.uniforms.uTime!.value = elapsed;
+
+    // Dawn begins only in the last stretch. Below 0.8 there is none at all, so
+    // four districts out of five still buys you evening — the morning belongs
+    // to the fifth delivery, and it should feel like that one earned it.
+    this.material.uniforms.uDawn!.value = THREE.MathUtils.smoothstep(illumination, 0.8, 1.0);
+  }
+
+  /** How far into dawn the sky is, 0..1. */
+  get dawn(): number {
+    return this.material.uniforms.uDawn!.value as number;
   }
 
   /** Fog must match the horizon, or the terrain edge cuts against the sky. */

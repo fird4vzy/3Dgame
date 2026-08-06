@@ -153,6 +153,8 @@ export class PlanetScene implements IScene {
   private fogBaseFar = 76;
   /** Smoothed 0.42..1.2 multiplier on that range. */
   private fogOpenness = 1;
+  /** Seconds since the run began, for the slow drift in the sky. */
+  private skyClock = 0;
 
   constructor(
     private readonly renderer: RendererService,
@@ -287,6 +289,11 @@ export class PlanetScene implements IScene {
       this.player.object3D.getWorldDirection(_forward);
       this.rig.reset(this.controller.smoothedPosition, _forward);
     }
+  }
+
+  /** How far into dawn the sky is, for tooling and tests. */
+  get skydomeDawn(): number {
+    return this.skydome?.dawn ?? 0;
   }
 
   get isMenuMode(): boolean {
@@ -1024,7 +1031,17 @@ export class PlanetScene implements IScene {
     // stops meaning "overhead". This has to run every frame because the player
     // moves; the palette work below only runs when illumination changes.
     _skyUp.copy(this.controller.smoothedPosition).normalize();
-    this.skydome.update(_skyUp, fraction);
+    this.skyClock += this.lastDelta;
+    this.skydome.update(_skyUp, fraction, this.skyClock);
+
+    // Stars fade as the morning comes up, on top of the fade they already do
+    // as districts light. Two reasons to lose them, and the second one only
+    // arrives at the very end.
+    if (this.stars) {
+      const material = this.stars.material as THREE.PointsMaterial;
+      material.opacity = Math.max(0, 1 - fraction * 0.55) * (1 - this.skydome.dawn * 0.9);
+      material.transparent = true;
+    }
 
     if (Math.abs(fraction - this.skyLevel) < 0.002) return;
     this.skyLevel = fraction;
