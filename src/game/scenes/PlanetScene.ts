@@ -43,6 +43,7 @@ import { buildDistrictProps, buildLighthouse, buildVillageSet } from '@game/enti
 import { buildGroundCover } from '@game/entities/groundCover';
 import { Cats, catSpots } from '@game/entities/cats';
 import { loadInstancedProp } from '@engine/render/instancedProp';
+import { loadStylisedModel } from '@engine/render/stylise';
 import { Skydome, createStarfield } from '@game/world/Skydome';
 import type { MinimapMarker } from '@game/world/mapMarkers';
 import { buildCourier, type RenRig } from '@game/entities/CourierCharacter';
@@ -70,6 +71,10 @@ const SHARD_COLOUR = new THREE.Color('#f6bd60');
 const _skyUp = new THREE.Vector3();
 const _fillRight = new THREE.Vector3();
 const _lightAnchor = new THREE.Vector3();
+const _villagerUp = new THREE.Vector3();
+const _villagerTo = new THREE.Vector3();
+const _villagerFwd = new THREE.Vector3();
+const _villagerRight = new THREE.Vector3();
 
 export interface PlanetSceneCallbacks {
   onDistrictChanged?(id: DistrictId, displayName: string): void;
@@ -129,7 +134,14 @@ export class PlanetScene implements IScene {
   private skyLevel = -1;
   private skydome!: Skydome;
   /** Resident rigs, for the idle sway. */
-  private readonly villagerRigs: Array<{ rig: RenRig; phase: number }> = [];
+  private villagerRigs: Array<{ rig: RenRig; phase: number; body: THREE.Object3D }> = [];
+  /** Authored residents: whole-body idle, since an imported mesh has no bones. */
+  private readonly villagerBodies: Array<{
+    body: THREE.Object3D;
+    object: THREE.Object3D;
+    phase: number;
+    restYaw: number;
+  }> = [];
   private villagerSway = 0;
   private cats: Cats | null = null;
   private fireflies!: Fireflies;
@@ -773,6 +785,7 @@ export class PlanetScene implements IScene {
     // blink every cat out at once.
     void this.cats.load(import.meta.env.BASE_URL);
     this.registerCats();
+    void this.loadVillagerModels();
 
     // The Spire's lighthouse: tall enough to crest the horizon from outside its
     // own district, which is what makes the final delivery navigable.
@@ -813,7 +826,12 @@ export class PlanetScene implements IScene {
         rig.root.position.y = 0;
         body.add(rig.root);
         // A slow idle sway, seeded per person so they are not synchronised.
-        this.villagerRigs.push({ rig, phase: Math.random() * Math.PI * 2 });
+        //
+        // Kept as the fallback that shows until the authored model arrives, and
+        // for good after that if it never does. A resident who is briefly a
+        // simple rig is a resident; a resident who is briefly nothing is a bug
+        // report about missing NPCs.
+        this.villagerRigs.push({ rig, phase: Math.random() * Math.PI * 2, body });
       } else {
         body.add(createVillager(npc.colour));
       }
@@ -1326,6 +1344,55 @@ export class PlanetScene implements IScene {
       rig.armL.rotation.x = Math.sin(t * 0.7) * 0.05;
       rig.armR.rotation.x = -Math.sin(t * 0.7) * 0.05;
     }
+
+    this.updateAuthoredVillagers(dt);
+  }
+
+  /**
+   * Life for a resident with no bones.
+   *
+   * Three things, and the third is the one that matters.
+   *
+   * **Breathing** and **a weight shift** keep them from being furniture — the
+   * shift is slower than the breath and on a different axis, because two sines
+   * at the same rate read as one wobble rather than as a body doing two things.
+   *
+   * **And they turn to face you.** A person who keeps looking at the horizon
+   * while you stand in front of them is scenery no matter how good the model
+   * is; one who turns is someone waiting for you. It only happens inside
+   * talking distance, and it eases rather than snaps, because a head that locks
+   * on instantly reads as a turret.
+   */
+  private updateAuthoredVillagers(dt: number): void {
+    if (this.villagerBodies.length === 0) return;
+
+    const player = this.controller.smoothedPosition;
+    const follow = 1 - Math.exp(-2.2 * dt);
+
+    for (const entry of this.villagerBodies) {
+      const t = this.villagerSway + entry.phase;
+
+      // Breathe, and shift weight. Small: at this scale a centimetre reads.
+      entry.object.scale.setScalar(1 + Math.sin(t * 1.15) * 0.011);
+      entry.object.position.y = Math.sin(t * 1.15) * 0.008;
+      entry.object.rotation.z = Math.sin(t * 0.43) * 0.026;
+
+      // Turn toward the player when they are close enough to talk to.
+      _villagerUp.copy(entry.body.position).normalize();
+      _villagerTo.copy(player).sub(entry.body.position);
+      const distance = _villagerTo.length();
+      _villagerTo.projectOnPlane(_villagerUp);
+
+      let wanted = entry.restYaw;
+      if (distance < 6 && _villagerTo.lengthSq() > 1e-6) {
+        _villagerTo.normalize();
+        _villagerFwd.set(0, 0, 1).applyQuaternion(entry.body.quaternion);
+        _villagerRight.copy(_villagerUp).cross(_villagerFwd).normalize();
+        wanted = Math.atan2(_villagerRight.dot(_villagerTo), _villagerFwd.dot(_villagerTo));
+      }
+
+      entry.object.rotation.y += (wanted - entry.object.rotation.y) * follow;
+    }
   }
 
   /** Motes follow the player, and multiply as the district around them wakes. */
@@ -1371,6 +1438,73 @@ export class PlanetScene implements IScene {
 
     fog.near = this.fogBaseNear * this.fogOpenness;
     fog.far = this.fogBaseFar * this.fogOpenness;
+  }
+
+  /**
+   * Swap the procedural residents for authored ones.
+   *
+   * The mix asked for: the *look* of an imported model with the *life* of the
+   * rig it replaces. An imported mesh has no bones, so nothing inside it can
+   * move — but a standing person mostly does not move inside either. What they
+   * do is breathe, shift their weight, and turn to face whoever walks up. All
+   * three are whole-body, which is exactly what a rigid mesh can do.
+   *
+   * Three models across six residents, assigned by role rather than at random:
+   * the postmaster is the postmaster wherever you meet him.
+   *
+   * Loaded after the scene is standing, and each one replaces its placeholder
+   * the moment it lands. Nothing waits on this — a resident who is briefly a
+   * simple rig is still a resident.
+   */
+  private async loadVillagerModels(): Promise<void> {
+    const MODELS: Record<string, [string, number]> = {
+      odd: ['villager_odd', 1.6],
+      mara: ['villager_woman', 1.62],
+      wren: ['villager_child', 1.15],
+      finn: ['villager_odd', 1.58],
+      sol: ['villager_woman', 1.6],
+      bea: ['villager_child', 1.2],
+    };
+
+    // Load each distinct model once and clone it. Six separate loads of three
+    // files would fetch, parse and upload the same geometry twice over.
+    const cache = new Map<string, Promise<THREE.Object3D | null>>();
+    const load = (name: string, height: number): Promise<THREE.Object3D | null> => {
+      const key = `${name}:${height}`;
+      let pending = cache.get(key);
+      if (!pending) {
+        pending = loadStylisedModel(`${import.meta.env.BASE_URL}assets/models/${name}.glb`, {
+          height,
+          anchor: 'feet',
+          harmonise: 0.06,
+        }).catch(() => null);
+        cache.set(key, pending);
+      }
+      return pending;
+    };
+
+    await Promise.all(
+      Object.entries(MODELS).map(async ([id, [name, height]]) => {
+        const model = await load(name, height);
+        const body = this.npcObjects.get(id);
+        if (!model || !body) return;
+
+        // Drop the placeholder rig, keep the interaction ring.
+        for (const child of [...body.children]) {
+          if (child.name !== 'interaction-ring') body.remove(child);
+        }
+        this.villagerRigs = this.villagerRigs.filter((entry) => entry.body !== body);
+
+        const instance = model.clone(true);
+        body.add(instance);
+        this.villagerBodies.push({
+          body,
+          object: instance,
+          phase: Math.random() * Math.PI * 2,
+          restYaw: 0,
+        });
+      }),
+    );
   }
 
   private updatePetals(dt: number): void {
