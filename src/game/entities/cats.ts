@@ -222,12 +222,20 @@ export class Cats {
       // cat whose eyes snap open the instant the hand stops looks startled.
       // Holding the squint slightly longer than the body movement is what makes
       // it read as contentment trailing off.
-      const showHappy = cat.happy > PET_DURATION * 0.12;
-      const shown = showHappy ? this.happyMesh : mesh;
-      const hidden = showHappy ? mesh : this.happyMesh;
+      // Only ever hide one if there is another to show.
+      //
+      // This hid the calm cat whenever the happy one was wanted — including
+      // when the happy model had failed to load, in which case `shown` was null
+      // and the cat simply vanished the moment you petted it. Deciding *after*
+      // resolving both meshes means the worst case is a cat that does not
+      // change expression, which is a limitation; a cat that disappears is a
+      // bug, and the two must never be confused.
+      const wantsHappy = cat.happy > PET_DURATION * 0.12;
+      const shown = (wantsHappy ? this.happyMesh : mesh) ?? mesh;
+      const hidden = shown === mesh ? this.happyMesh : mesh;
 
-      shown?.setMatrixAt(i, _matrix);
-      if (hidden) {
+      shown.setMatrixAt(i, _matrix);
+      if (hidden && hidden !== shown) {
         _hiddenMatrix.makeScale(0, 0, 0);
         hidden.setMatrixAt(i, _hiddenMatrix);
       }

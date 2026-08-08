@@ -76,11 +76,20 @@ export class Skydome {
         // the sky from being a static backdrop, and a dawn that only begins to
         // arrive once the planet is nearly lit — the last district you deliver
         // to is the one that brings the morning.
+        // Dawn is now a bright day, not a pale one.
+        //
+        // The first pass washed out to near-white at full illumination, which
+        // is what an over-bright horizon does to a three-stop ramp: lift the
+        // bottom without deepening the top and the whole gradient collapses.
+        // The reference is a Ghibli afternoon — a *deep* blue overhead falling
+        // to a pale warm horizon — so the zenith goes darker and more saturated
+        // at the same time as the horizon brightens. The contrast between them
+        // is the sky; the brightness alone is just exposure.
         uDawn: { value: 0 },
-        uZenithDawn: { value: new THREE.Color('#3c4a86') },
-        uMidDawn: { value: new THREE.Color('#a58bb4') },
-        uHorizonDawn: { value: new THREE.Color('#f0a9a0') },
-        uGlowDawn: { value: new THREE.Color('#ffd9a0') },
+        uZenithDawn: { value: new THREE.Color('#2b6fc4') },
+        uMidDawn: { value: new THREE.Color('#78b4e4') },
+        uHorizonDawn: { value: new THREE.Color('#c8e2f2') },
+        uGlowDawn: { value: new THREE.Color('#ffe6bc') },
 
         /** Seconds, for the drift. */
         uTime: { value: 0 },

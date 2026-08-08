@@ -734,17 +734,16 @@ export class PlanetScene implements IScene {
       // planet you can walk around in four minutes — and a torii is a
       // *threshold*. Fifteen of them is a fence, and a fence means nothing.
       // One, standing at the edge of the settlement, is an entrance.
-      const forTorii = villageSpots.slice(0, 1);
-      const forLantern = villageSpots.filter((_, i) => i > 0 && i % 3 !== 0);
-      const forStall = villageSpots.filter((_, i) => i > 0 && i % 3 === 0);
+      const forLantern = villageSpots.filter((_, i) => i % 3 !== 0);
+      const forStall = villageSpots.filter((_, i) => i % 3 === 0);
 
       for (const mesh of buildVillageSet(forStall, def.id.length * 449)) {
         this.world.scene.add(mesh);
         this.cameraOccluders.push(mesh);
       }
 
-      void this.addImportedProp('torii', forTorii, 3.6, def.id.length * 7717);
       void this.addImportedProp('ishidoro', forLantern, 1.5, def.id.length * 331);
+      if (def.id === 'bramblewood') void this.buildShrineApproach(centre);
 
       // Ground cover: flowers, grass, mushrooms, pebbles. The world had trees
       // and lamps and bare ground between them, which reads as empty however
@@ -1505,6 +1504,56 @@ export class PlanetScene implements IScene {
         });
       }),
     );
+  }
+
+  /**
+   * One shrine approach, in the wood.
+   *
+   * A torii is a *threshold*, not scenery. Scattered one per district they were
+   * five gates standing in five fields, which says nothing — a gate only means
+   * something when there is a clear this-side and that-side, and an avenue of
+   * them says "you are arriving somewhere" before you can see what.
+   *
+   * So there is exactly one on the planet: a line of gates walking a great
+   * circle toward the middle of Bramblewood, each a little smaller than the
+   * last. The taper is the trick — it reads as perspective from any distance
+   * and makes a nine-metre path feel like a long approach.
+   */
+  private async buildShrineApproach(centre: THREE.Vector3): Promise<void> {
+    const COUNT = 6;
+    const up = centre.clone().normalize();
+
+    // A tangent to walk along. Any consistent one will do; the wood has no
+    // preferred compass direction.
+    const along = new THREE.Vector3(0, 1, 0).projectOnPlane(up);
+    if (along.lengthSq() < 1e-6) along.set(1, 0, 0).projectOnPlane(up);
+    along.normalize();
+
+    const gates: THREE.Vector3[] = [];
+    const lanterns: THREE.Vector3[] = [];
+    const side = up.clone().cross(along).normalize();
+
+    for (let i = 0; i < COUNT; i++) {
+      // Walking *outward* from the centre, so the largest gate is furthest and
+      // you pass through them going in.
+      const distance = 3 + i * 2.6;
+      const direction = centre.clone().addScaledVector(along, distance).normalize();
+      gates.push(direction.clone().multiplyScalar(PlanetTerrain.heightAt(direction)));
+
+      // Lanterns line the path between the gates, alternating sides.
+      const offset = direction
+        .clone()
+        .addScaledVector(side, i % 2 === 0 ? 1.9 : -1.9)
+        .normalize();
+      lanterns.push(offset.multiplyScalar(PlanetTerrain.heightAt(offset)));
+    }
+
+    for (let i = 0; i < gates.length; i++) {
+      // Each gate a touch smaller than the one behind it.
+      const height = 4.2 - i * 0.28;
+      await this.addImportedProp('torii', [gates[i]!], height, 7717 + i);
+    }
+    await this.addImportedProp('ishidoro', lanterns, 1.4, 8821);
   }
 
   private updatePetals(dt: number): void {

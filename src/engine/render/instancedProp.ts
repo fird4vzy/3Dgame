@@ -123,6 +123,20 @@ export async function loadInstancedProp(
   mesh.castShadow = options.castShadow ?? true;
   mesh.receiveShadow = options.receiveShadow ?? true;
 
+  // Never frustum-cull one of these.
+  //
+  // An InstancedMesh gets its bounding volume from the *geometry*, not from
+  // where the instances ended up, and these instances are scattered across a
+  // whole planet — so the test is meaningless at best. At worst it is a bug:
+  // the cats keep a second mesh for their happy face whose instances all sit at
+  // zero scale until someone pets one, three computes a degenerate bounding
+  // sphere from that, and the mesh is culled forever. The symptom was a cat
+  // that *vanished* the moment you reached for it.
+  //
+  // Horizon culling already removes what is on the far side of the world, and
+  // it works per instance, which is the level this actually needs.
+  mesh.frustumCulled = false;
+
   // Deterministic jitter from the seed, so a district looks the same on every
   // load — the same reason the procedural scatter is seeded.
   let state = seed >>> 0;
