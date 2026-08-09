@@ -799,6 +799,18 @@ export class PlanetScene implements IScene {
     this.world.scene.add(group);
     this.lighthouse = { lamp, light };
     void spireCentre;
+
+    // Authored tower over the procedural one.
+    //
+    // The *lamp* stays procedural and keeps driving the light, because that is
+    // the thing the illumination system talks to and the thing the whole last
+    // delivery is about. Only the tower under it is replaced — swap the lamp
+    // too and the landmark stops responding to the game.
+    //
+    // So the procedural shaft is hidden rather than removed: the lamp and its
+    // point light are its children, and taking the group out would take them
+    // with it.
+    void this.replaceLighthouseTower(group, spirePoint);
   }
 
   private readonly lampGroups = new Map<
@@ -1519,6 +1531,55 @@ export class PlanetScene implements IScene {
    * last. The taper is the trick — it reads as perspective from any distance
    * and makes a nine-metre path feel like a long approach.
    */
+  /**
+   * Put an authored tower under the procedural lamp.
+   *
+   * Everything structural in the old lighthouse is hidden, not deleted, because
+   * the lamp and its point light are children of that group — and the lamp is
+   * the part the illumination system drives and the part the final delivery is
+   * *about*. Replacing the whole thing would give us a prettier landmark that
+   * no longer responds to the game.
+   *
+   * The lamp is then lifted to the new tower's gallery, since a light floating
+   * at the old height would sit halfway down the new shaft.
+   */
+  private async replaceLighthouseTower(
+    group: THREE.Group,
+    position: THREE.Vector3,
+  ): Promise<void> {
+    const TOWER_HEIGHT = 14;
+
+    let model: THREE.Object3D;
+    try {
+      model = await loadStylisedModel(
+        `${import.meta.env.BASE_URL}assets/models/lighthouse.glb`,
+        { height: TOWER_HEIGHT, anchor: 'feet', harmonise: 0.05 },
+      );
+    } catch {
+      // Keep the procedural tower. A landmark that fails to load is a landmark
+      // that stays as it was, never a hole in the skyline.
+      return;
+    }
+
+    const lamp = this.lighthouse?.lamp;
+    for (const child of [...group.children]) {
+      // Anything that is not the lamp or its light is structure.
+      const keep = child === lamp || (child as THREE.PointLight).isPointLight;
+      if (!keep) child.visible = false;
+    }
+
+    group.add(model);
+
+    // Lamp to the gallery. Slightly below the very top, where the lantern room
+    // actually is rather than where the finial is.
+    if (lamp) lamp.position.y = TOWER_HEIGHT * 0.86;
+    if (this.lighthouse?.light) this.lighthouse.light.position.y = TOWER_HEIGHT * 0.86;
+
+    this.cameraOccluders.push(model);
+    this.rig?.addOccluders([model]);
+    void position;
+  }
+
   private async buildShrineApproach(centre: THREE.Vector3): Promise<void> {
     const COUNT = 6;
     const up = centre.clone().normalize();
