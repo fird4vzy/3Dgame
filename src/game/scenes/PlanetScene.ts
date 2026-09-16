@@ -39,10 +39,15 @@ import { IlluminationSystem } from '@game/systems/IlluminationSystem';
 import { DeliverySystem } from '@game/systems/DeliverySystem';
 import { ShardSystem } from '@game/systems/ShardSystem';
 import { ParticleSystem } from '@engine/vfx/ParticleSystem';
-import { buildDistrictProps, buildLighthouse, buildVillageSet } from '@game/entities/districtProps';
+import {
+  buildDistrictProps,
+  buildLighthouse,
+  buildRocks,
+  buildVillageSet,
+} from '@game/entities/districtProps';
 import { buildGroundCover } from '@game/entities/groundCover';
 import { Cats, catSpots } from '@game/entities/cats';
-import { loadInstancedProp } from '@engine/render/instancedProp';
+import { loadInstancedProp, type InstancedPropOptions } from '@engine/render/instancedProp';
 import { loadStylisedModel } from '@engine/render/stylise';
 import { Skydome, createStarfield } from '@game/world/Skydome';
 import type { MinimapMarker } from '@game/world/mapMarkers';
@@ -50,6 +55,7 @@ import { buildCourier, type RenRig } from '@game/entities/CourierCharacter';
 import { VILLAGER_SPECS } from '@game/entities/characterSpec';
 import { Fireflies } from '@game/world/Fireflies';
 import { Petals } from '@game/world/Petals';
+import { planWorld, type ShrinePrecinct, type WorldLayout } from '@game/world/layout';
 
 import { DISTRICTS, NPCS, npcById, type DistrictId, type ParcelWeight } from '../../data/content';
 
@@ -144,6 +150,8 @@ export class PlanetScene implements IScene {
   }> = [];
   private villagerSway = 0;
   private cats: Cats | null = null;
+  /** Where everything goes, decided before the ground was built. */
+  private layout!: WorldLayout;
   private fireflies!: Fireflies;
   private petals!: Petals;
   private readonly firefliesColour = new THREE.Color();
@@ -163,7 +171,7 @@ export class PlanetScene implements IScene {
   /** Fog range before altitude scales it. See updateValleyFog. */
   private fogBaseNear = 15;
   private fogBaseFar = 76;
-  /** Smoothed 0.42..1.2 multiplier on that range. */
+  /** Smoothed 0.75..1.2 multiplier on that range. */
   private fogOpenness = 1;
   /** Seconds since the run began, for the slow drift in the sky. */
   private skyClock = 0;
@@ -184,6 +192,11 @@ export class PlanetScene implements IScene {
 
   async onEnter(): Promise<void> {
     this.bus.emit('scene:willEnter', { id: this.id });
+
+    // Layout before terrain: the ground is levelled under the buildings, so
+    // it has to know where they are before it is displaced.
+    this.layout = planWorld();
+    this.terrain.rebuild();
 
     this.buildEnvironment();
     this.buildLighting();
@@ -518,12 +531,13 @@ export class PlanetScene implements IScene {
   private buildLighting(): void {
     const scene = this.world.scene;
 
-    // Dusk, but legible: the planet is dim, not black. Characters still have
-    // to be readable before their district is lit.
-    this.ambient = new THREE.HemisphereLight(0x8894b4, 0x242a3a, 0.95);
+    // Daylight. The sky is blue and the grass bounces green back up; the
+    // unlit world is this with the colour turned down, not a night. See the
+    // note on Skydome for why the dusk reading was abandoned.
+    this.ambient = new THREE.HemisphereLight(0xbcd3f0, 0x55654a, 0.85);
     scene.add(this.ambient);
 
-    this.sun = new THREE.DirectionalLight(0xffd9a0, 1.5);
+    this.sun = new THREE.DirectionalLight(0xfff1dc, 2.1);
     this.sun.castShadow = this.renderer.renderer.shadowMap.enabled;
     if (this.sun.castShadow) {
       this.sun.shadow.mapSize.set(1024, 1024);
@@ -614,8 +628,8 @@ export class PlanetScene implements IScene {
 
   private buildDistricts(): void {
     for (const def of DISTRICTS) {
-      const centre = this.districts.centreOf(def.id);
-      const positions = scatterAround(centre, def.lampCount, def.radius * 0.55, def.id.length * 977);
+      const plan = this.layout.districts.get(def.id)!;
+      const positions = plan.lamps;
 
       const lights: THREE.PointLight[] = [];
       const bulbs: THREE.Mesh[] = [];
@@ -636,29 +650,10 @@ export class PlanetScene implements IScene {
 
       this.lampGroups.set(def.id, { district: def.id, lights, bulbs, delays });
 
-      // Everything solid this district has already claimed.
-      //
-      // Each prop set used to scatter in ignorance of the others, so with
-      // enough sets on the same ground a stone lantern ended up standing inside
-      // a cottage. One list, passed down and grown as each set places, is all
-      // the coordination this needs.
-      const taken: THREE.Vector3[] = [...positions];
-
       // District silhouettes — the landmarks the player navigates by, since the
-      // horizon is only 13.5 m away and there is no map screen.
-      //
-      // 4 m apart: a cottage is about 4 m across, so this states "do not
-      // overlap" as a distance rather than as a hope.
-      const propSpots = scatterAround(
-        centre,
-        def.id === 'spire' ? 18 : 30,
-        def.radius * 0.85,
-        def.id.length * 613 + 7,
-        undefined,
-        4,
-        taken,
-      );
-      taken.push(...propSpots);
+      // horizon is only 13.5 m away and there is no map screen. Where they go
+      // was decided in the layout, with the ground levelled under them.
+      const propSpots = plan.props;
 
       // Authored Japanese architecture, where the district has buildings.
       //
@@ -711,16 +706,7 @@ export class PlanetScene implements IScene {
       // feel lived in. A gate to walk under, a lantern someone lit and a stall
       // someone runs do — and scattering them wider than the landmarks fills
       // the ground between districts, which was the emptiest part of the world.
-      const villageSpots = scatterAround(
-        centre,
-        def.id === 'spire' ? 8 : 14,
-        def.radius * 1.15,
-        def.id.length * 877 + 31,
-        undefined,
-        4.5,
-        taken,
-      );
-      taken.push(...villageSpots);
+      const villageSpots = plan.village;
       // Authored gates and lanterns, with the procedural stalls still carrying
       // the rest.
       //
@@ -743,7 +729,7 @@ export class PlanetScene implements IScene {
       }
 
       void this.addImportedProp('ishidoro', forLantern, 1.5, def.id.length * 331);
-      if (def.id === 'bramblewood') void this.buildShrineApproach(centre);
+      if (def.id === 'bramblewood') void this.buildShrinePrecinct(this.layout.shrine);
 
       // Ground cover: flowers, grass, mushrooms, pebbles. The world had trees
       // and lamps and bare ground between them, which reads as empty however
@@ -752,16 +738,12 @@ export class PlanetScene implements IScene {
       // A district covers roughly 4,000 m² of surface, so a couple of hundred
       // plants is one every twenty metres — invisible. This is the density that
       // actually reads as ground cover when you are standing in it.
-      const coverSpots = scatterAround(
-        centre,
-        1000,
-        def.radius * 0.8,
-        def.id.length * 1231 + 3,
-      );
-      for (const mesh of buildGroundCover(def.id, coverSpots, def.id.length * 787)) {
+      for (const mesh of buildGroundCover(def.id, plan.cover, def.id.length * 787)) {
         this.world.scene.add(mesh);
       }
     }
+
+    this.buildWilderness();
 
     // Cats, at the edges of every settlement.
     //
@@ -788,17 +770,12 @@ export class PlanetScene implements IScene {
 
     // The Spire's lighthouse: tall enough to crest the horizon from outside its
     // own district, which is what makes the final delivery navigable.
-    const spireCentre = this.districts.centreOf('spire');
-    const spirePoint = surfacePoint(
-      { lat: DISTRICTS[4]!.centre.lat, lon: DISTRICTS[4]!.centre.lon },
-      0,
-    );
+    const spirePoint = this.layout.lighthouse;
     const { group, lamp, light } = buildLighthouse();
     group.position.copy(spirePoint);
     group.quaternion.copy(surfaceQuaternion(spirePoint));
     this.world.scene.add(group);
     this.lighthouse = { lamp, light };
-    void spireCentre;
 
     // Authored tower over the procedural one.
     //
@@ -1066,9 +1043,11 @@ export class PlanetScene implements IScene {
     // Stars fade as the morning comes up, on top of the fade they already do
     // as districts light. Two reasons to lose them, and the second one only
     // arrives at the very end.
+    // No stars in a day sky. Kept built, since the menu's orbital shot still
+    // wants them against space.
     if (this.stars) {
       const material = this.stars.material as THREE.PointsMaterial;
-      material.opacity = Math.max(0, 1 - fraction * 0.55) * (1 - this.skydome.dawn * 0.9);
+      material.opacity = this.menuMode ? 0.9 : 0;
       material.transparent = true;
     }
 
@@ -1081,7 +1060,7 @@ export class PlanetScene implements IScene {
       // — but against the horizon *as drawn*, which the dome darkens as it
       // approaches the ground. Matching the raw uniform instead washes the
       // whole surface out to a flat pale sheet, which is what it did.
-      this.skydome.horizonColour(fog.color, fraction).multiplyScalar(0.62);
+      this.skydome.horizonColour(fog.color, fraction).multiplyScalar(0.94);
       // Visibility opens up as the world lights: dusk hides the far side.
       //
       // Stored rather than written straight to the fog, because `updateValleyFog`
@@ -1089,14 +1068,13 @@ export class PlanetScene implements IScene {
       // input — the classic way a per-frame modulation quietly becomes a
       // runaway.
       const horizon = horizonDistance(PLANET_RADIUS, PLAYER_HEIGHT);
-      this.fogBaseNear = horizon * (1.1 + fraction * 0.5);
-      this.fogBaseFar = horizon * (5.5 + fraction * 2.5);
+      // Daylight is *clear*. Aerial perspective starts past the horizon
+      // and only fully takes over well beyond it; the old dusk range turned
+      // a house ten metres off into a pale silhouette.
+      this.fogBaseNear = horizon * (2.2 + fraction * 0.6);
+      this.fogBaseFar = horizon * (9 + fraction * 3);
     }
 
-    if (this.stars) {
-      const material = this.stars.material as THREE.PointsMaterial;
-      material.opacity = Math.max(0, 1 - fraction * 0.85);
-    }
   }
 
   /** A mote burst at every lamp in a district as it wakes. */
@@ -1265,12 +1243,13 @@ export class PlanetScene implements IScene {
     positions: THREE.Vector3[],
     height: number,
     seed: number,
+    options: Partial<InstancedPropOptions> = {},
   ): Promise<void> {
     const mesh = await loadInstancedProp(
       `${import.meta.env.BASE_URL}assets/models/${name}.glb`,
       positions,
       seed,
-      { height, anchor: 'feet', scaleJitter: 0.12, harmonise: 0.08 },
+      { height, anchor: 'feet', scaleJitter: 0.12, harmonise: 0.08, ...options },
     );
     if (!mesh) return;
 
@@ -1443,7 +1422,9 @@ export class PlanetScene implements IScene {
     const altitude = this.controller.smoothedPosition.length() - SEA_LEVEL_RADIUS;
     // Thickest at the waterline, gone by four metres up.
     const openness = THREE.MathUtils.smoothstep(altitude, 0.2, 4.2);
-    const wanted = 0.42 + openness * 0.78;
+    // A gentle haze in the hollows, never a whiteout: in daylight the valley
+    // mist is a hint, not a wall.
+    const wanted = 0.75 + openness * 0.45;
 
     this.fogOpenness += (wanted - this.fogOpenness) * (1 - Math.exp(-1.6 * dt));
 
@@ -1471,10 +1452,14 @@ export class PlanetScene implements IScene {
     const MODELS: Record<string, [string, number]> = {
       odd: ['villager_odd', 1.6],
       mara: ['villager_woman', 1.62],
-      wren: ['villager_child', 1.15],
+      // The child model came back chibi — four heads tall beside a player
+      // drawn at seven — and next to her it read as a doll, not a person. The
+      // two youngest residents borrow the adult builds, a touch shorter, until
+      // a child at true proportion is generated.
+      wren: ['villager_woman', 1.5],
       finn: ['villager_odd', 1.58],
       sol: ['villager_woman', 1.6],
-      bea: ['villager_child', 1.2],
+      bea: ['villager_odd', 1.48],
     };
 
     // Load each distinct model once and clone it. Six separate loads of three
@@ -1580,41 +1565,51 @@ export class PlanetScene implements IScene {
     void position;
   }
 
-  private async buildShrineApproach(centre: THREE.Vector3): Promise<void> {
-    const COUNT = 6;
-    const up = centre.clone().normalize();
-
-    // A tangent to walk along. Any consistent one will do; the wood has no
-    // preferred compass direction.
-    const along = new THREE.Vector3(0, 1, 0).projectOnPlane(up);
-    if (along.lengthSq() < 1e-6) along.set(1, 0, 0).projectOnPlane(up);
-    along.normalize();
-
-    const gates: THREE.Vector3[] = [];
-    const lanterns: THREE.Vector3[] = [];
-    const side = up.clone().cross(along).normalize();
-
-    for (let i = 0; i < COUNT; i++) {
-      // Walking *outward* from the centre, so the largest gate is furthest and
-      // you pass through them going in.
-      const distance = 3 + i * 2.6;
-      const direction = centre.clone().addScaledVector(along, distance).normalize();
-      gates.push(direction.clone().multiplyScalar(PlanetTerrain.heightAt(direction)));
-
-      // Lanterns line the path between the gates, alternating sides.
-      const offset = direction
-        .clone()
-        .addScaledVector(side, i % 2 === 0 ? 1.9 : -1.9)
-        .normalize();
-      lanterns.push(offset.multiplyScalar(PlanetTerrain.heightAt(offset)));
+  /**
+   * The shrine precinct: gates in a line, all facing along the path, lanterns
+   * in pairs, the hall at the end. Laid out in `layout.ts`; this only loads
+   * the models into it.
+   */
+  private async buildShrinePrecinct(shrine: ShrinePrecinct): Promise<void> {
+    for (const [i, gate] of shrine.gates.entries()) {
+      await this.addImportedProp('torii', [gate.position], gate.height, 7717 + i, {
+        yaws: [gate.yaw],
+        scaleJitter: 0,
+      });
     }
+    await this.addImportedProp('ishidoro', shrine.lanterns, 1.4, 8821, { scaleJitter: 0 });
+    await this.addImportedProp('shrine', [shrine.hall.position], 4.4, 9931, {
+      yaws: [shrine.hall.yaw],
+      scaleJitter: 0,
+    });
+    await this.addImportedProp('momiji', shrine.momiji, 4.8, 10007);
+    await this.addImportedProp('sakura', shrine.sakura, 5.8, 10009);
+  }
 
-    for (let i = 0; i < gates.length; i++) {
-      // Each gate a touch smaller than the one behind it.
-      const height = 4.2 - i * 0.28;
-      await this.addImportedProp('torii', [gates[i]!], height, 7717 + i);
+  /**
+   * Trees and rocks over the rest of the planet.
+   *
+   * The districts filled their own ground and left everything between them
+   * bare, which on a world you can see a quarter of at once was most of what
+   * you saw. Three tree species instanced across the whole sphere, and rocks
+   * where the trees are not.
+   */
+  private buildWilderness(): void {
+    const { trees, rocks, cover } = this.layout.wilderness;
+    const species: Array<[string, number]> = [
+      ['sakura', 5.2],
+      ['momiji', 4.6],
+      ['bamboo', 4.4],
+    ];
+    species.forEach(([name, height], i) => {
+      void this.addImportedProp(name, trees[i]!, height, 12001 + i, { scaleJitter: 0.18 });
+    });
+    const rockMesh = buildRocks(rocks, 12111);
+    this.world.scene.add(rockMesh);
+    this.cameraOccluders.push(rockMesh);
+    for (const mesh of buildGroundCover('landing', cover, 12211)) {
+      this.world.scene.add(mesh);
     }
-    await this.addImportedProp('ishidoro', lanterns, 1.4, 8821);
   }
 
   private updatePetals(dt: number): void {

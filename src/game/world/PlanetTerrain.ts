@@ -23,13 +23,21 @@ export type SurfaceKind = 'grass' | 'sand' | 'stone';
  */
 const PALETTE: Record<SurfaceKind, THREE.Color> = {
   grass: new THREE.Color('#6d8a63'),
-  sand: new THREE.Color('#cabb95'),
+  sand: new THREE.Color('#dccb9e'),
   stone: new THREE.Color('#8b8b8f'),
 };
 
+/** Dry coastal grass, between the beach and the meadow. */
+const DUNE_GRASS = new THREE.Color('#b3c16a');
+
+/** Packed earth and gravel — a track people walk. */
+const PATH_COLOUR = new THREE.Color('#b8a98c');
+
 /** Grass is a range, not a value — see `paint`. */
-const GRASS_LOW = new THREE.Color('#4c6350');
-const GRASS_HIGH = new THREE.Color('#87a271');
+// Lush under a day sky. The sage pair was mixed for dusk and under daylight
+// read as khaki; the reference hillsides are a saturated spring green.
+const GRASS_LOW = new THREE.Color('#4a7a3c');
+const GRASS_HIGH = new THREE.Color('#8ec45c');
 
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
 
@@ -37,6 +45,47 @@ const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
 function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = clamp01((x - edge0) / (edge1 - edge0));
   return t * t * (3 - 2 * t);
+}
+
+/**
+ * A level platform cut into the terrain for something to stand on.
+ *
+ * Buildings are placed at a point, but they have a *footprint*, and on a hill
+ * the two disagree: put a five-metre farmhouse down on a slope and the uphill
+ * wall is buried to the sill while the downhill one hangs in the air. Every
+ * screenshot of a "floating house" was this. The honest fix is the one real
+ * villages use — level the ground first — and doing it inside {@link
+ * PlanetTerrain.heightAt} rather than as a plinth mesh means the mesh, the
+ * collision and every prop scattered nearby all agree, by construction.
+ */
+export interface TerrainPad {
+  /** Unit direction from the planet centre. */
+  direction: THREE.Vector3;
+  /** Radius the pad is to be, in metres. */
+  height: number;
+  /** Metres from the centre that are dead flat. */
+  flat: number;
+  /** Metres from the centre by which the pad has blended back into the hill. */
+  blend: number;
+}
+
+/**
+ * A worn track, painted into the ground.
+ *
+ * Purely visual — it does not change the height — but a shrine approach with
+ * no path under it is a row of gates in a field, and the path is what turns
+ * them into a route.
+ */
+export interface TerrainPath {
+  from: THREE.Vector3;
+  to: THREE.Vector3;
+  /** Half-width in metres at full strength; the edge softens over as much again. */
+  width: number;
+}
+
+interface PreparedPad extends TerrainPad {
+  /** cos of the outer angle, so most pads are rejected with one dot product. */
+  cosOuter: number;
 }
 
 /**
@@ -66,11 +115,13 @@ export class PlanetTerrain {
     this.mesh.castShadow = true;
 
     const waterGeometry = new THREE.IcosahedronGeometry(SEA_LEVEL_RADIUS, 5);
+    // A clear lagoon blue under a day sky. The old teal was mixed for dusk
+    // and under daylight read as grey-green paint.
     const waterMaterial = createToonMaterial({
-      color: '#2f6f86',
+      color: '#3b98c4',
       bands: 3,
       transparent: true,
-      opacity: 0.86,
+      opacity: 0.82,
     });
 
     // Move the surface in the vertex shader.
@@ -133,7 +184,120 @@ export class PlanetTerrain {
     const shaped = continents * 0.72 + hills * 0.28;
     const signed = (shaped - 0.46) * 2;
 
-    return PLANET_RADIUS + signed * TERRAIN_AMPLITUDE;
+    let height = PLANET_RADIUS + signed * TERRAIN_AMPLITUDE;
+
+    // Level ground under anything with a footprint. Linear in the number of
+    // pads, but a dot product each and a few dozen pads, and the mesh is only
+    // built once — gameplay queries are a handful per frame.
+    //
+    // Where pads overlap, the strongest one has to win outright rather than
+    // share: blending two pads at different heights *across* a footprint tilts
+    // the flat that was the whole point. Raising the weights to a power before
+    // averaging does that — a pad at full strength drowns out a neighbour's
+    // skirt — and pads whose flats actually touch are merged to one height in
+    // `setPads`, so nothing is left to fight over.
+    let sum = 0;
+    let sumHeight = 0;
+    let strongest = 0;
+    for (const pad of PlanetTerrain.pads) {
+      const cosA = d.dot(pad.direction);
+      if (cosA < pad.cosOuter) continue;
+      const distance = Math.acos(Math.min(1, cosA)) * PLANET_RADIUS;
+      const weight = 1 - smoothstep(pad.flat, pad.blend, distance);
+      if (weight <= 0) continue;
+      const sharp = weight * weight * weight * weight;
+      sum += sharp;
+      sumHeight += sharp * pad.height;
+      if (weight > strongest) strongest = weight;
+    }
+    if (sum > 0) height += (sumHeight / sum - height) * strongest;
+
+    return height;
+  }
+
+  private static pads: PreparedPad[] = [];
+  private static paths: TerrainPath[] = [];
+
+  /** Replace the set of painted tracks. Takes effect on the next build. */
+  static setPaths(paths: TerrainPath[]): void {
+    PlanetTerrain.paths = paths.map((p) => ({ ...p, from: p.from.clone(), to: p.to.clone() }));
+  }
+
+  /**
+   * Replace the set of level pads. Call before the mesh is built (or call
+   * {@link rebuild} after), because the height function is what the mesh is
+   * displaced from.
+   */
+  static setPads(pads: TerrainPad[]): void {
+    const prepared: PreparedPad[] = pads.map((pad) => ({
+      ...pad,
+      direction: pad.direction.clone().normalize(),
+      cosOuter: Math.cos(pad.blend / PLANET_RADIUS),
+    }));
+
+    // Pads whose flats touch become one terrace at their mean height.
+    //
+    // Two houses four metres apart each want the ground level under
+    // themselves, and if the ground under one is a metre higher than under
+    // the other there is no honest way to give both what they want. A shared
+    // terrace is what a real village does with that hillside.
+    const group = prepared.map((_, i) => i);
+    const find = (i: number): number => (group[i] === i ? i : (group[i] = find(group[i]!)));
+    for (let i = 0; i < prepared.length; i++) {
+      for (let j = i + 1; j < prepared.length; j++) {
+        const a = prepared[i]!;
+        const b = prepared[j]!;
+        const distance = Math.acos(Math.min(1, a.direction.dot(b.direction))) * PLANET_RADIUS;
+        if (distance < (a.flat + b.flat) * 0.95) group[find(i)] = find(j);
+      }
+    }
+    const totals = new Map<number, { sum: number; count: number }>();
+    prepared.forEach((pad, i) => {
+      const root = find(i);
+      const t = totals.get(root) ?? { sum: 0, count: 0 };
+      t.sum += pad.height;
+      t.count++;
+      totals.set(root, t);
+    });
+    prepared.forEach((pad, i) => {
+      const t = totals.get(find(i))!;
+      pad.height = t.sum / t.count;
+    });
+
+    PlanetTerrain.pads = prepared;
+  }
+
+  /**
+   * A pad for something standing at `position`, level with the ground at its
+   * centre *as it is now* — so this must be called on the un-padded terrain,
+   * before {@link setPads}, or pads start stacking on each other.
+   */
+  static padAt(position: THREE.Vector3, flat: number, blend = flat + 3): TerrainPad {
+    const direction = position.clone().normalize();
+    return { direction, height: PlanetTerrain.heightAt(direction), flat, blend };
+  }
+
+  /** 0..1, how much of a painted track lies under a surface direction. */
+  private static trackAt(direction: THREE.Vector3, height: number): number {
+    if (PlanetTerrain.paths.length === 0) return 0;
+    _t0.copy(direction).multiplyScalar(height);
+    let strength = 0;
+    for (const path of PlanetTerrain.paths) {
+      // Point-to-segment in Cartesian: at these lengths the chord and the arc
+      // differ by less than the vertex spacing.
+      _t1.copy(path.to).sub(path.from);
+      const lengthSq = _t1.lengthSq();
+      const t = lengthSq > 0 ? clamp01(_t2.copy(_t0).sub(path.from).dot(_t1) / lengthSq) : 0;
+      _t2.copy(path.from).addScaledVector(_t1, t);
+      const distance = _t2.distanceTo(_t0);
+      strength = Math.max(strength, 1 - smoothstep(path.width, path.width * 2, distance));
+    }
+    return strength;
+  }
+
+  /** Re-displace the mesh from the current height function. */
+  rebuild(): void {
+    this.displace(this.mesh.geometry);
   }
 
   /** Convenience: the height function above, for any world-space point. */
@@ -282,7 +446,13 @@ export class PlanetTerrain {
       // amplitude is 6 m, so sand claimed most of the habitable surface and the
       // world read as desert. A beach is the strip you can throw a stone across
       // from the water; everything past it is grass.
-      const sand = 1 - smoothstep(SEA_LEVEL_RADIUS + 0.02, SEA_LEVEL_RADIUS + 0.38, height);
+      // The strip itself is narrow; above it a paler, drier green runs up
+      // the first half-metre so the beach meets meadow instead of lawn. The
+      // planet's flats sit just above the waterline, and a wider band here
+      // turned every one of them into desert.
+      const meadow = 1 - smoothstep(SEA_LEVEL_RADIUS + 0.12, SEA_LEVEL_RADIUS + 0.7, height);
+      if (meadow > 0) colour.lerp(DUNE_GRASS, meadow * 0.7);
+      const sand = 1 - smoothstep(SEA_LEVEL_RADIUS + 0.02, SEA_LEVEL_RADIUS + 0.14, height);
       if (sand > 0) colour.lerp(PALETTE.sand, sand);
 
       // Stone comes from altitude *or* steepness, whichever is stronger. Kept
@@ -296,6 +466,10 @@ export class PlanetTerrain {
       const bySlope = smoothstep(0.12, 0.30, slope);
       const stone = Math.max(byAltitude, bySlope);
       if (stone > 0) colour.lerp(PALETTE.stone, stone * 0.92);
+
+      // Tracks, over everything but the water's edge.
+      const track = PlanetTerrain.trackAt(v, height);
+      if (track > 0) colour.lerp(PATH_COLOUR, track * 0.85);
 
       // Finally a little tonal grain, and a touch of depth in the hollows.
       colour.multiplyScalar(1 + grain * 0.09 - Math.max(0, -drift) * 0.06);
@@ -318,3 +492,6 @@ const _n3 = new THREE.Vector3();
 const _n4 = new THREE.Vector3();
 const _n5 = new THREE.Vector3();
 const _n6 = new THREE.Vector3();
+const _t0 = new THREE.Vector3();
+const _t1 = new THREE.Vector3();
+const _t2 = new THREE.Vector3();

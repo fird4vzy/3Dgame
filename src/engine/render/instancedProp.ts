@@ -26,6 +26,12 @@ export interface InstancedPropOptions extends StyliseOptions {
   scaleJitter?: number;
   /** Random yaw about the surface normal. */
   randomYaw?: boolean;
+  /**
+   * An explicit yaw per instance, in radians. Overrides `randomYaw`: a gate
+   * on a path has to face along the path, and a row of them at random
+   * headings is exactly what a scatter of gates looked like.
+   */
+  yaws?: number[];
 }
 
 const _matrix = new THREE.Matrix4();
@@ -45,6 +51,52 @@ export function orientToSurface(position: THREE.Vector3, yaw: number): THREE.Qua
   _bitangent.copy(_up).cross(_tangent).normalize();
   _basis.makeBasis(_bitangent, _up, _tangent);
   return _quat.setFromRotationMatrix(_basis);
+}
+
+/**
+ * The Y at which a model's *visible* base sits.
+ *
+ * Not the bounding-box minimum. A generated model can carry a handful of stray
+ * vertices below the thing it depicts — a sliver of foundation the mesher left
+ * behind, a fragment of a ground plane — and the box minimum dutifully reports
+ * *them*. Anchor on that and the house stands on a point nobody can see, a
+ * hand's width above the grass. Measured across the catalogue: the minka had
+ * six per cent of its height in such vertices, and that six per cent was the
+ * gap under every farmhouse on the planet.
+ *
+ * So the base is found by density: the lowest slab of the model that holds a
+ * meaningful share of its vertices. A thin post still clears the bar — a torii
+ * leg is a few hundred vertices — while a dozen strays do not.
+ */
+export function groundLevel(geometry: THREE.BufferGeometry): number {
+  const position = geometry.getAttribute('position');
+  const count = position.count;
+  if (count === 0) return 0;
+
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const y = position.getY(i);
+    if (y < min) min = y;
+    if (y > max) max = y;
+  }
+  const height = max - min;
+  if (height < 1e-6) return min;
+
+  // Two per cent of the model's height per slab: coarse enough that a
+  // building's sill counts as one slab, fine enough that the answer is within
+  // a few centimetres on anything human-sized.
+  const BINS = 50;
+  const histogram = new Uint32Array(BINS);
+  for (let i = 0; i < count; i++) {
+    const bin = Math.min(BINS - 1, Math.floor(((position.getY(i) - min) / height) * BINS));
+    histogram[bin]!++;
+  }
+
+  const threshold = count * 0.005;
+  let bin = 0;
+  while (bin < BINS - 1 && histogram[bin]! < threshold) bin++;
+  return min + (bin / BINS) * height;
 }
 
 /** Collapse a loaded model to a single geometry + material, baking transforms. */
@@ -77,12 +129,11 @@ export function flatten(root: THREE.Object3D): {
   // vertical offset. In play that is a cat buried to its ankles and a torii
   // hovering a hand's width off the grass. Measuring here removes a whole class
   // of "why is it floating" by construction.
-  geometry.computeBoundingBox();
-  const minY = geometry.boundingBox?.min.y ?? 0;
+  const minY = groundLevel(geometry);
   if (Math.abs(minY) > 1e-4) {
     geometry.translate(0, -minY, 0);
-    geometry.computeBoundingBox();
   }
+  geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
 
   const material = Array.isArray(mesh.material) ? mesh.material[0]! : mesh.material;
@@ -149,11 +200,11 @@ export async function loadInstancedProp(
   positions.forEach((position, index) => {
     const scale = 1 + (rng() - 0.5) * 2 * jitter;
     _scale.setScalar(scale);
-    _matrix.compose(
-      position,
-      orientToSurface(position, options.randomYaw === false ? 0 : rng() * Math.PI * 2),
-      _scale,
-    );
+    // Draw the random yaw regardless, so the sequence — and every other
+    // instance's heading — is the same whether or not this one is authored.
+    const random = rng() * Math.PI * 2;
+    const yaw = options.yaws?.[index] ?? (options.randomYaw === false ? 0 : random);
+    _matrix.compose(position, orientToSurface(position, yaw), _scale);
     mesh.setMatrixAt(index, _matrix);
   });
   mesh.instanceMatrix.needsUpdate = true;

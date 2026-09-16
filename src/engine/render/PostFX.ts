@@ -52,9 +52,10 @@ export class PostFX {
 
     this.bloom = new BloomEffect({
       blendFunction: BlendFunction.ADD,
-      // Sits above lit terrain but below a lamp's emissive, so dusk stays dusk
-      // and only genuine light sources glow.
-      luminanceThreshold: 0.55,
+      // Above anything the day sky reaches — at 0.55 the horizon and every
+      // cloud bloomed, and the sky was a white sheet — but below a lamp's
+      // emissive, so only genuine light sources glow.
+      luminanceThreshold: 0.82,
       luminanceSmoothing: 0.28,
       intensity: tier === 'high' ? 1.35 : 1.0,
       mipmapBlur: true,

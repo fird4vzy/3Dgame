@@ -188,7 +188,7 @@ export class IlluminationSystem {
   private updateAmbient(): void {
     const total = this.districts.all.reduce((sum, d) => sum + d.light, 0);
     const fraction = total / Math.max(1, this.districts.all.length);
-    this.ambient.intensity = this.baseAmbient + fraction * 0.8;
-    this.ambient.color.set('#6b7796').lerp(new THREE.Color('#f0d7ad'), fraction * 0.7);
+    this.ambient.intensity = this.baseAmbient + fraction * 0.45;
+    this.ambient.color.set('#bcd3f0').lerp(new THREE.Color('#fbe6c4'), fraction * 0.6);
   }
 }
