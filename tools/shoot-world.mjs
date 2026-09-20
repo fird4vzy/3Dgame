@@ -79,6 +79,8 @@ const shots = [
   ['03-bramblewood', 'bramblewood', 21, 0, 180, 8],
   ['04-wild', 'coil', 20, -40, 60, 6],
   ['05-tidebreak', 'tidebreak', 0, 0, 240, 8],
+  ['06-coil', 'coil', 0, 0, 30, 10],
+  ['07-tidebreak-b', 'tidebreak', 0, 0, 60, 8],
 ];
 for (const [name, ...args] of shots) {
   await standAt(...args);

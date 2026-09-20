@@ -70,6 +70,7 @@ const _tint = new THREE.Color();
 const DUSK_TINT = new THREE.Color('#7f8aa8');
 const LIT_TINT = new THREE.Color('#ffffff');
 const _emitUp = new THREE.Vector3();
+const STEAM = new THREE.Color('#7f939b');
 const _emitPos = new THREE.Vector3();
 const DUST_COLOUR = new THREE.Color('#b9ae94');
 /** Matches the shard mesh's emissive, so the burst reads as the shard itself. */
@@ -392,6 +393,7 @@ export class PlanetScene implements IScene {
     this.updateValleyFog(dt);
     this.updateParcelVisual(dt);
     this.updateLighthouse();
+    this.updateSteam(dt);
     this.updateSky();
     this.particles.update(dt, this.renderer.camera);
     this.trackDistrict();
@@ -788,6 +790,54 @@ export class PlanetScene implements IScene {
     // point light are its children, and taking the group out would take them
     // with it.
     void this.replaceLighthouseTower(group, spirePoint);
+
+    // Tidebreak's landmark: a torii in the shallows, facing the shore. The
+    // one thing on the planet that stands in the water, which is what makes
+    // the sea a place rather than an edge.
+    const sea = this.layout.seaTorii;
+    if (sea) {
+      void this.addImportedProp('torii', [sea.position], 8.5, 13001, {
+        yaws: [sea.yaw],
+        scaleJitter: 0,
+      });
+    }
+  }
+
+  private steamClock = 0;
+
+  /**
+   * Steam off the Coil's springs.
+   *
+   * Continuous, so it is metered: one puff per vent every seventh of a second,
+   * and only for vents within earshot of the player. Additive particles are
+   * as bright as they are opaque, so the colour is a dim blue-grey — a white
+   * puff would bloom into a lamp.
+   */
+  private updateSteam(dt: number): void {
+    const vents = this.layout.vents;
+    if (vents.length === 0) return;
+    this.steamClock += dt;
+    if (this.steamClock < 0.14) return;
+    this.steamClock = 0;
+
+    const player = this.controller.smoothedPosition;
+    for (const vent of vents) {
+      if (vent.distanceToSquared(player) > 32 * 32) continue;
+      _emitUp.copy(vent).normalize();
+      this.particles.emit({
+        position: vent,
+        count: 1,
+        colour: STEAM,
+        speed: [0.45, 0.85],
+        life: [1.9, 2.9],
+        size: [0.28, 0.5],
+        direction: _emitUp,
+        spread: 0.3,
+        // Buoyant: steam speeds up as it rises rather than falling back.
+        gravity: _emitUp.clone().multiplyScalar(0.3),
+        drag: 0.5,
+      });
+    }
   }
 
   private readonly lampGroups = new Map<

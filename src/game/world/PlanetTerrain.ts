@@ -67,6 +67,13 @@ export interface TerrainPad {
   flat: number;
   /** Metres from the centre by which the pad has blended back into the hill. */
   blend: number;
+  /**
+   * Whether this pad joins a shared terrace with pads whose flats touch it.
+   * Default true; false for something that is not a building's footing — a
+   * lagoon cut below the waterline must not average its depth with the
+   * houses on its shore.
+   */
+  merge?: boolean;
 }
 
 /**
@@ -248,6 +255,7 @@ export class PlanetTerrain {
         const a = prepared[i]!;
         const b = prepared[j]!;
         const distance = Math.acos(Math.min(1, a.direction.dot(b.direction))) * PLANET_RADIUS;
+        if (a.merge === false || b.merge === false) continue;
         if (distance < (a.flat + b.flat) * 0.95) group[find(i)] = find(j);
       }
     }

@@ -142,38 +142,87 @@ function buildTrees(positions: THREE.Vector3[], seed: number): THREE.InstancedMe
   ];
 }
 
-/** The Coil: vertical pipes and squat tanks — industrial verticality. */
+/**
+ * The Coil: hot-spring works.
+ *
+ * The verticals stay — a district has to keep its silhouette — but grey
+ * industrial pipe had no place on this planet. These are copper standpipes
+ * with verdigris collars, each rising from a stone basin the spring fills,
+ * and the pool in the basin is the district's own teal. The "core" Finn talks
+ * about is the source under the ground; the steam is added by the scene.
+ */
 function buildPipes(positions: THREE.Vector3[], seed: number): THREE.InstancedMesh[] {
-  const pipe = new THREE.CylinderGeometry(0.22, 0.22, 3.4, 8);
+  const pipe = new THREE.CylinderGeometry(0.2, 0.22, 3.4, 8);
   pipe.translate(0, 1.7, 0);
 
-  const collar = new THREE.TorusGeometry(0.3, 0.07, 6, 12);
-  collar.rotateX(Math.PI / 2);
-  collar.translate(0, 2.6, 0);
+  // Two collars: one at the mouth, one where it leaves the basin.
+  const collarTop = new THREE.TorusGeometry(0.29, 0.07, 6, 12);
+  collarTop.rotateX(Math.PI / 2);
+  collarTop.translate(0, 3.1, 0);
+  const collarBase = new THREE.TorusGeometry(0.31, 0.08, 6, 12);
+  collarBase.rotateX(Math.PI / 2);
+  collarBase.translate(0, 0.55, 0);
+  const collar = mergeGeometries([collarTop, collarBase])!;
+
+  // A stone basin with the pool inside it. The pool is a disc a hair below
+  // the rim, so the rim's shadow lands on it and it reads as sunk.
+  const basin = new THREE.CylinderGeometry(0.95, 0.8, 0.42, 10);
+  basin.translate(0, 0.21, 0);
+  const pool = new THREE.CylinderGeometry(0.8, 0.8, 0.04, 10);
+  pool.translate(0, 0.4, 0);
 
   const shape: InstanceOptions = {
-    scaleRange: [0.7, 1.4],
-    stretch: { y: 0.4 },
+    scaleRange: [0.75, 1.35],
+    stretch: { y: 0.35 },
     tint: 0.1,
   };
+  // The basin does not stretch with the pipe: a taller pipe is a taller pipe,
+  // not a deeper pool.
+  const footing: InstanceOptions = { scaleRange: [0.75, 1.35], stretch: { y: 0.35 }, tint: 0.06 };
 
   return [
-    instanced(pipe, createToonMaterial({ color: '#5d6472' }), positions, seed, shape),
-    instanced(collar, createToonMaterial({ color: '#8a6a3f' }), positions, seed, shape),
+    instanced(pipe, createToonMaterial({ color: '#9c5f3d' }), positions, seed, shape),
+    instanced(collar, createToonMaterial({ color: '#5ea59c' }), positions, seed, shape),
+    instanced(basin, createToonMaterial({ color: '#8b8b8f' }), positions, seed, footing),
+    instanced(
+      pool,
+      createToonMaterial({ color: '#5ec8c0', emissive: '#2c6f6b', emissiveIntensity: 0.6 }),
+      positions,
+      seed,
+      footing,
+    ),
   ];
 }
 
-/** Tidebreak: low boardwalk decks and mooring posts. */
+/**
+ * Tidebreak: a fishing shore.
+ *
+ * Low decks and mooring posts, in weathered cedar rather than the muddy brown
+ * they were, with a rope loop on every post so they read as moorings and not
+ * as fence. The district's landmark — a torii standing in the shallows — is
+ * an imported model and is placed by the scene.
+ */
 function buildBoardwalk(positions: THREE.Vector3[], seed: number): THREE.InstancedMesh[] {
   const deck = new THREE.BoxGeometry(2.6, 0.16, 1.4);
   deck.translate(0, 0.1, 0);
+  // Two cross-battens under the deck, so it has an underside when the
+  // ground falls away.
+  const battenA = new THREE.BoxGeometry(0.18, 0.22, 1.5);
+  battenA.translate(-0.9, 0.0, 0);
+  const battenB = new THREE.BoxGeometry(0.18, 0.22, 1.5);
+  battenB.translate(0.9, 0.0, 0);
+  const planking = mergeGeometries([deck, battenA, battenB])!;
 
-  const post = new THREE.CylinderGeometry(0.1, 0.1, 1.1, 6);
-  post.translate(0, 0.55, 0);
+  const post = new THREE.CylinderGeometry(0.1, 0.12, 1.2, 6);
+  post.translate(1.1, 0.6, 0.5);
+  const rope = new THREE.TorusGeometry(0.16, 0.035, 5, 10);
+  rope.rotateX(Math.PI / 2);
+  rope.translate(1.1, 1.0, 0.5);
 
   return [
-    instanced(deck, createToonMaterial({ color: '#7a6248' }), positions, seed, [0.8, 1.2]),
-    instanced(post, createToonMaterial({ color: '#5f4c38' }), positions, seed, [0.8, 1.2]),
+    instanced(planking, createToonMaterial({ color: '#a88a66' }), positions, seed, [0.8, 1.2]),
+    instanced(post, createToonMaterial({ color: '#6e5a44' }), positions, seed, [0.8, 1.2]),
+    instanced(rope, createToonMaterial({ color: '#d9c9a0' }), positions, seed, [0.8, 1.2]),
   ];
 }
 

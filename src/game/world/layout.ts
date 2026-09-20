@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { PLANET_RADIUS } from '@config/constants';
+import { PLANET_RADIUS, SEA_LEVEL_RADIUS } from '@config/constants';
 import { PlanetTerrain, type TerrainPad, type TerrainPath } from './PlanetTerrain';
 import { scatterAround, surfacePoint } from './placement';
-import { DISTRICTS, type DistrictId } from '../../data/content';
+import { DISTRICTS, NPCS, type DistrictId } from '../../data/content';
 
 /**
  * Where everything in the world goes — decided before the ground is built.
@@ -62,6 +62,13 @@ export interface WorldLayout {
   districts: Map<DistrictId, DistrictLayout>;
   shrine: ShrinePrecinct;
   lighthouse: THREE.Vector3;
+  /**
+   * Tidebreak's landmark: a torii standing in the shallows off its shore,
+   * facing the land. Null only if the district has no water within reach.
+   */
+  seaTorii: Placed | null;
+  /** Where the Coil's springs vent steam — the tops of its standpipes. */
+  vents: THREE.Vector3[];
   /** Trees and rocks across the whole planet, outside the settlements. */
   wilderness: { trees: THREE.Vector3[][]; rocks: THREE.Vector3[]; cover: THREE.Vector3[] };
 }
@@ -129,6 +136,46 @@ function planShrine(taken: THREE.Vector3[]): ShrinePrecinct {
   );
 
   return { gates, lanterns, hall, momiji, sakura, path: { from: at(20), to: at(0) } };
+}
+
+/**
+ * The nearest stretch of open water to a point, for something that stands
+ * *in* the sea rather than beside it.
+ *
+ * A spiral outward from the centre, taking the first direction where the
+ * ground is comfortably under the waterline — deep enough that the swell does
+ * not expose the seabed around it — and returning the point at the surface.
+ */
+function planSeaTorii(centre: THREE.Vector3): Placed | null {
+  const { up, along, side } = frameAt(centre);
+  // Deep enough to be *in* the water, not at its edge: the lagoon's shelf is
+  // 0.62 under, so this lands a few metres past the waterline.
+  const DEPTH = 0.58;
+  let best: { direction: THREE.Vector3; distance: number } | null = null;
+
+  for (let ring = 4; ring <= 40 && !best; ring += 2) {
+    const steps = Math.max(8, Math.round(ring * 1.5));
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      const direction = centre
+        .clone()
+        .addScaledVector(along, Math.cos(a) * ring)
+        .addScaledVector(side, Math.sin(a) * ring)
+        .normalize();
+      if (PlanetTerrain.heightAt(direction) < SEA_LEVEL_RADIUS - DEPTH) {
+        best = { direction, distance: ring };
+        break;
+      }
+    }
+  }
+  if (!best) return null;
+
+  // Face the shore: the passage (local Z) points back at the district centre,
+  // so from the beach you look out through the gate to the sea.
+  const position = best.direction.clone().multiplyScalar(SEA_LEVEL_RADIUS + 0.08);
+  const toCentre = centre.clone().sub(position).projectOnPlane(up).normalize();
+  const yaw = Math.atan2(toCentre.dot(side), toCentre.dot(along));
+  return { position, yaw };
 }
 
 /**
@@ -210,7 +257,36 @@ export function planWorld(): WorldLayout {
   PlanetTerrain.setPads([]);
   PlanetTerrain.setPaths([]);
 
-  const pads: TerrainPad[] = [];
+  // Tidebreak's sea, first of all — because it has to exist before anything
+  // is scattered, or the scatter puts a stall on what is about to be seabed.
+  //
+  // The noise makes a planet that is nine parts land, and the district whose
+  // whole story is a pier over the water had no water within a hundred
+  // metres. A pad cut below the waterline is a lagoon: the same mechanism
+  // that levels the ground under a house, run the other way, and because it
+  // lives in `heightAt` the beach, the collision and the water's edge all
+  // agree about where it is. Placed on the far side of the centre from Sol,
+  // who has to stay on dry land.
+  const tidebreak = districtCentre('tidebreak');
+  const sol = surfacePoint(NPCS.find((n) => n.id === 'sol')!.at, 0);
+  const awayFromSol = tidebreak
+    .clone()
+    .sub(sol)
+    .projectOnPlane(tidebreak.clone().normalize())
+    .normalize();
+  // Knee-deep, on purpose. Nothing stops the player walking into the sea,
+  // and at a metre and a half the camera went under with her; at this depth
+  // she wades, the gate still stands in water, and the bed is a sandy shelf.
+  const lagoon: TerrainPad = {
+    direction: tidebreak.clone().addScaledVector(awayFromSol, 30).normalize(),
+    height: SEA_LEVEL_RADIUS - 0.62,
+    flat: 14,
+    blend: 26,
+    merge: false,
+  };
+  PlanetTerrain.setPads([lagoon]);
+
+  const pads: TerrainPad[] = [lagoon];
   const paths: TerrainPath[] = [];
   const districts = new Map<DistrictId, DistrictLayout>();
   const everything: THREE.Vector3[] = [];
@@ -281,6 +357,15 @@ export function planWorld(): WorldLayout {
   pads.push(PlanetTerrain.padAt(lighthouse, 3.5, 9));
   everything.push(lighthouse);
 
+  const seaTorii = planSeaTorii(districtCentre('tidebreak'));
+  if (seaTorii) everything.push(seaTorii.position);
+
+  // Steam rises from the standpipe mouths, about three metres up. Every
+  // other one — a district where every pipe vents is a fog bank.
+  const vents = (districts.get('coil')?.props ?? [])
+    .filter((_, i) => i % 2 === 0)
+    .map((p) => p.clone().addScaledVector(p.clone().normalize(), 3.1));
+
   const wilderness = planWilderness(everything);
 
   PlanetTerrain.setPads(pads);
@@ -304,5 +389,5 @@ export function planWorld(): WorldLayout {
   wilderness.rocks.forEach(settle);
   wilderness.cover.forEach(settle);
 
-  return { districts, shrine, lighthouse, wilderness };
+  return { districts, shrine, lighthouse, seaTorii, vents, wilderness };
 }
