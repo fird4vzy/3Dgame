@@ -18,6 +18,17 @@
  *
  * `text` runs the whole thing: submit, poll, download. The other three are for
  * when a job outlives the terminal you started it in.
+ *
+ * Characters — a person from a picture, rigged and animated:
+ *   node tools/meshy.mjs character <image.png> <name> <actionIds> [texture prompt words]
+ *     image -> 3D in an A-pose -> auto-rig -> the listed library animations in
+ *     one GLB, written to public/assets/characters/<name>.glb. SPENDS CREDITS
+ *     at every step. Each step can also be run on its own:
+ *   node tools/meshy.mjs image <image.png> <name> [texture prompt words]
+ *   node tools/meshy.mjs rig <imageTaskId> <name> [heightMetres]
+ *   node tools/meshy.mjs animate <rigTaskId> <name> <actionIds>
+ *   node tools/meshy.mjs library [search words]      (free: lists action ids)
+ *   node tools/meshy.mjs task <kind> <taskId>         (kind: image|rig|animate)
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -127,11 +138,18 @@ async function submitRefine(previewTaskId) {
   return result.result ?? result.id;
 }
 
-async function status(taskId) {
-  return api(`/v2/text-to-3d/${taskId}`);
+const ROUTES = {
+  text: '/v2/text-to-3d',
+  image: '/v1/image-to-3d',
+  rig: '/v1/rigging',
+  animate: '/v1/animations',
+};
+
+async function status(taskId, kind = 'text') {
+  return api(`${ROUTES[kind]}/${taskId}`);
 }
 
-async function waitFor(taskId) {
+async function waitFor(taskId, kind = 'text') {
   process.stdout.write(`task ${taskId} `);
 
   // A poll that fails is not a job that failed.
@@ -146,7 +164,7 @@ async function waitFor(taskId) {
   for (let attempt = 0; attempt < 240; attempt++) {
     let task;
     try {
-      task = await status(taskId);
+      task = await status(taskId, kind);
       consecutiveErrors = 0;
     } catch (error) {
       consecutiveErrors++;
@@ -174,6 +192,111 @@ async function waitFor(taskId) {
     await sleep(5000);
   }
   throw new Error(`timed out after 20 minutes; recover with: fetch ${taskId} <name>`);
+}
+
+// ── characters ────────────────────────────────────────────────────────────
+
+const CHARACTER_DIR = join(ROOT, 'public', 'assets', 'characters');
+
+async function save(url, file) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`download -> ${response.status}`);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, Buffer.from(await response.arrayBuffer()));
+  const mb = (readFileSync(file).length / 1024 / 1024).toFixed(2);
+  console.log(`wrote ${file.slice(ROOT.length + 1)}  (${mb} MB)`);
+}
+
+/**
+ * A person from a picture, standing in an A-pose.
+ *
+ * The pose matters more than anything else here: auto-rigging a figure with
+ * an arm raised to take a photo gives a skeleton whose rest pose is that
+ * gesture, and every animation is then played relative to it. Meshy can
+ * re-pose the figure itself, so the concept art does not have to be redrawn.
+ */
+async function submitImage(imagePath, prompt) {
+  const mime = imagePath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+  const image = `data:${mime};base64,${readFileSync(imagePath).toString('base64')}`;
+  const body = {
+    image_url: image,
+    ai_model: 'latest',
+    pose_mode: 'a-pose',
+    should_texture: true,
+    should_remesh: true,
+    target_polycount: 24000,
+    topology: 'triangle',
+    target_formats: ['glb'],
+    ...(prompt ? { texture_prompt: prompt } : {}),
+  };
+  const result = await api('/v1/image-to-3d', { method: 'POST', body: JSON.stringify(body) });
+  return result.result;
+}
+
+/** Auto-rig a finished image-to-3D task as a humanoid. */
+async function submitRig(imageTaskId, height) {
+  const result = await api('/v1/rigging', {
+    method: 'POST',
+    body: JSON.stringify({ input_task_id: imageTaskId, height_meters: height }),
+  });
+  return result.result;
+}
+
+/** Library animations on a finished rig, merged into one GLB, one clip each. */
+async function submitAnimate(rigTaskId, actionIds) {
+  const result = await api('/v1/animations', {
+    method: 'POST',
+    body: JSON.stringify({ rig_task_id: rigTaskId, action_ids: actionIds }),
+  });
+  return result.result;
+}
+
+function parseIds(text) {
+  const ids = String(text ?? '')
+    .split(',')
+    .map((v) => Number.parseInt(v.trim(), 10))
+    .filter((v) => Number.isFinite(v));
+  if (ids.length === 0 || ids.length > 10) throw new Error('give 1-10 comma-separated action ids (see: library)');
+  return ids;
+}
+
+async function runImage(imagePath, name, prompt) {
+  if (!existsSync(imagePath)) throw new Error(`no such image: ${imagePath}`);
+  console.log(`image -> 3D (A-pose): ${imagePath}`);
+  const id = await submitImage(imagePath, prompt);
+  console.log(`image task: ${id}`);
+  const task = await waitFor(id, 'image');
+  await save(task.model_urls.glb, join(CHARACTER_DIR, `${name}-mesh.glb`));
+  if (task.thumbnail_url) await save(task.thumbnail_url, join(ROOT, 'tools', 'concepts', `${name}-mesh.png`));
+  return id;
+}
+
+async function runRig(imageTaskId, name, height) {
+  console.log(`rig ${imageTaskId} at ${height} m`);
+  const id = await submitRig(imageTaskId, height);
+  console.log(`rig task: ${id}`);
+  const task = await waitFor(id, 'rig');
+  await save(task.result.rigged_character_glb_url, join(CHARACTER_DIR, `${name}-rigged.glb`));
+  return id;
+}
+
+async function runAnimate(rigTaskId, name, actionIds) {
+  console.log(`animate ${rigTaskId}: ${actionIds.join(', ')}`);
+  const id = await submitAnimate(rigTaskId, actionIds);
+  console.log(`animation task: ${id}`);
+  const task = await waitFor(id, 'animate');
+  await save(task.result.animation_glb_url, join(CHARACTER_DIR, `${name}.glb`));
+  return id;
+}
+
+async function library(search) {
+  const query = search ? `?search=${encodeURIComponent(search)}` : '';
+  const list = await api(`/v1/animations/library${query}`);
+  const items = Array.isArray(list) ? list : (list.result ?? list.data ?? []);
+  for (const a of items) {
+    console.log(`${String(a.action_id).padStart(5)}  ${(a.name ?? '').padEnd(36)} ${a.category ?? ''} / ${a.sub_category ?? ''}`);
+  }
+  console.log(`${items.length} animations`);
 }
 
 async function download(task, name) {
@@ -231,6 +354,26 @@ try {
     const refineId = await submitRefine(previewId);
     console.log(`refine:    ${refineId}`);
     await download(await waitFor(refineId), name);
+  } else if (command === 'image') {
+    if (args.length < 2) throw new Error('usage: image <image.png> <name> [texture prompt words]');
+    await runImage(args[0], args[1], args.slice(2).join(' '));
+  } else if (command === 'rig') {
+    if (args.length < 2) throw new Error('usage: rig <imageTaskId> <name> [heightMetres]');
+    await runRig(args[0], args[1], Number(args[2] ?? 1.6));
+  } else if (command === 'animate') {
+    if (args.length < 3) throw new Error('usage: animate <rigTaskId> <name> <actionIds>');
+    await runAnimate(args[0], args[1], parseIds(args[2]));
+  } else if (command === 'character') {
+    if (args.length < 3) throw new Error('usage: character <image.png> <name> <actionIds> [texture prompt words]');
+    const ids = parseIds(args[2]);
+    const imageId = await runImage(args[0], args[1], args.slice(3).join(' '));
+    const rigId = await runRig(imageId, args[1], 1.6);
+    await runAnimate(rigId, args[1], ids);
+    console.log(`\ntasks: image ${imageId}  rig ${rigId}`);
+  } else if (command === 'library') {
+    await library(args.join(' '));
+  } else if (command === 'task') {
+    console.log(JSON.stringify(await status(args[1], args[0]), null, 1));
   } else if (command === 'status') {
     console.log(JSON.stringify(await status(args[0]), null, 1));
   } else if (command === 'fetch') {

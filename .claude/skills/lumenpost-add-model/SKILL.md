@@ -48,6 +48,19 @@ Placed props get collision automatically (`addObstacle` in PlanetScene, footprin
 - The world is PBR-lit (docs/24): ask Meshy for PBR maps — `styliseModel` keeps normal/roughness/metalness/AO maps and they visibly help. Metalness is capped at 0.15.
 - **Don't import trees.** Generated tree hulls look like faceted rock under real light; trees are procedural leaf-card crowns in `src/game/world/Trees.ts` (add a species there: a `SpeciesStyle` + a leaf painter).
 
+## Characters (rigged + animated)
+
+A person is a different pipeline: image → 3D in an **A-pose** → auto-rig → library animations, all Meshy, all spending credits (confirm first):
+
+```bash
+node tools/meshy.mjs library walk          # free: find action ids (idle, walk, run, jump…)
+node tools/meshy.mjs character tools/concepts/<front>.png <name> <id,id,…> [texture prompt]
+```
+
+Steps can be run separately (`image`, `rig <imageTaskId>`, `animate <rigTaskId>`), and `task <kind> <id>` recovers a job that outlived the terminal. Output: `public/assets/characters/<name>.glb` (mesh + skeleton + one clip per action). Concept images live in `tools/concepts/` — not `public/`, which ships with the build. Use a single full-body figure on a plain background; `pose_mode: a-pose` re-poses a figure caught mid-gesture.
+
+Wiring it in: a manifest in `src/data/characters/` mapping canonical clips (`idle`, `walk`, `run`, `jump_start`, `fall`, `land`, `carry_*`) to the GLB's clip names and `hand_R` to its right-hand bone, loaded by `engine/character/CharacterFactory` instead of the VRM in `main.ts › attachCharacter`.
+
 ## 5. Verify and ship
 
 - `node tools/probe-grounding.mjs` for anything with a footprint.
