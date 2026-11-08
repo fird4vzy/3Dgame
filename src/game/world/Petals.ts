@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applyAtmosphere } from '@engine/render/Atmosphere';
 
 const COUNT = 140;
 /** Radius around the player that petals inhabit, in metres. */
@@ -82,6 +83,21 @@ export class Petals {
       side: THREE.DoubleSide,
       depthWrite: false,
     });
+    // A petal drifting past the lens is a ten-centimetre card filling a
+    // quarter of the screen — a flat pink slab, not blossom. Fade them out
+    // inside the last metre before the camera.
+    material.onBeforeCompile = (shader) => {
+      applyAtmosphere(shader);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying float vPetalDepth;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvPetalDepth = -mvPosition.z;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vPetalDepth;')
+        .replace(
+          '#include <alphamap_fragment>',
+          '#include <alphamap_fragment>\ndiffuseColor.a *= smoothstep(0.7, 1.6, vPetalDepth);',
+        );
+    };
 
     this.mesh = new THREE.InstancedMesh(geometry, material, COUNT);
     this.mesh.name = 'petals';
@@ -104,7 +120,7 @@ export class Petals {
         driftPhase: Math.random() * Math.PI * 2,
         tumbleRate: 1.2 + Math.random() * 2.4,
         tumblePhase: Math.random() * Math.PI * 2,
-        size: 0.07 + Math.random() * 0.06,
+        size: 0.035 + Math.random() * 0.035,
       });
     }
   }

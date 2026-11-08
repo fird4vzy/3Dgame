@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createToonMaterial } from '@engine/render/ToonMaterial';
+import { createWorldMaterial } from '@engine/render/WorldMaterial';
 import { makeRng } from '@core/math/rng';
 import type { DistrictId } from '../../data/content';
 
@@ -29,7 +29,7 @@ function scatter(
   scaleRange: [number, number],
   emissive?: string,
 ): THREE.InstancedMesh {
-  const material = createToonMaterial(
+  const material = createWorldMaterial(
     emissive
       ? { color: colour, emissive, emissiveIntensity: 0.35 }
       : { color: colour },
@@ -70,12 +70,6 @@ function flowerGeometry(): { stem: THREE.BufferGeometry; head: THREE.BufferGeome
   head.translate(0, 0.17, 0);
 
   return { stem, head };
-}
-
-function grassGeometry(): THREE.BufferGeometry {
-  const blade = new THREE.ConeGeometry(0.028, 0.19, 3);
-  blade.translate(0, 0.095, 0);
-  return blade;
 }
 
 function mushroomGeometry(): { stalk: THREE.BufferGeometry; cap: THREE.BufferGeometry } {
@@ -123,36 +117,31 @@ export function buildGroundCover(
 
   switch (district) {
     case 'bramblewood': {
-      // Woodland floor: mushrooms, ferns, and pale flowers that catch the lamp.
+      // Woodland floor: mushrooms and pale flowers that catch the lamp. The
+      // grass itself is the GrassField's.
       const shrooms = slice(0, 0.3);
-      const grass = slice(0.3, 0.75);
       const blooms = slice(0.75, 1);
       return [
         scatter(stalk, '#d8cbb4', shrooms, seed, [0.8, 1.4]),
         scatter(cap, '#b05a4e', shrooms, seed, [0.8, 1.4]),
-        scatter(grassGeometry(), '#4f8a52', grass, seed + 1, [0.7, 1.5]),
         scatter(stem, '#4f8a52', blooms, seed + 2, [0.8, 1.2]),
         scatter(head, '#e8dcc0', blooms, seed + 2, [0.8, 1.2], '#fff1d0'),
       ];
     }
 
     case 'landing': {
-      // Kept meadow: grass and warm little flowers around the post office.
-      const grass = slice(0, 0.55);
+      // Kept meadow: warm little flowers around the post office.
       const blooms = slice(0.55, 1);
       return [
-        scatter(grassGeometry(), '#6f9a5c', grass, seed, [0.7, 1.3]),
         scatter(stem, '#6f9a5c', blooms, seed + 1, [0.9, 1.3]),
         scatter(head, '#e8a33a', blooms, seed + 1, [0.9, 1.3], '#ffd08a'),
       ];
     }
 
     case 'tidebreak': {
-      // Shore: tough grass and shingle.
-      const grass = slice(0, 0.45);
+      // Shore: shingle.
       const stones = slice(0.45, 1);
       return [
-        scatter(grassGeometry(), '#7f8f6a', grass, seed, [0.6, 1.1]),
         scatter(pebbleGeometry(), '#8d9099', stones, seed + 1, [0.6, 1.4]),
       ];
     }
@@ -169,11 +158,9 @@ export function buildGroundCover(
     }
 
     case 'spire': {
-      // Exposed and windswept: sparse grass, pale stones.
-      const grass = slice(0, 0.4);
+      // Exposed and windswept: pale stones.
       const stones = slice(0.4, 1);
       return [
-        scatter(grassGeometry(), '#8a9179', grass, seed, [0.5, 0.9]),
         scatter(pebbleGeometry(), '#a8a49b', stones, seed + 1, [0.5, 1.1]),
       ];
     }

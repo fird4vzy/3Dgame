@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { createToonMaterial } from '@engine/render/ToonMaterial';
-import { makeRng } from '@core/math/rng';
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { createWorldMaterial } from '@engine/render/WorldMaterial';
+import { makeRng, fbm3 } from '@core/math/rng';
 import type { DistrictId } from '../../data/content';
 
 /**
@@ -137,8 +137,8 @@ function buildTrees(positions: THREE.Vector3[], seed: number): THREE.InstancedMe
   };
 
   return [
-    instanced(trunk, createToonMaterial({ color: '#4a3a2c' }), positions, seed, shape),
-    instanced(canopy, createToonMaterial({ color: '#3f7d4a' }), positions, seed, shape),
+    instanced(trunk, createWorldMaterial({ color: '#4a3a2c' }), positions, seed, shape),
+    instanced(canopy, createWorldMaterial({ color: '#3f7d4a' }), positions, seed, shape),
   ];
 }
 
@@ -181,12 +181,12 @@ function buildPipes(positions: THREE.Vector3[], seed: number): THREE.InstancedMe
   const footing: InstanceOptions = { scaleRange: [0.75, 1.35], stretch: { y: 0.35 }, tint: 0.06 };
 
   return [
-    instanced(pipe, createToonMaterial({ color: '#9c5f3d' }), positions, seed, shape),
-    instanced(collar, createToonMaterial({ color: '#5ea59c' }), positions, seed, shape),
-    instanced(basin, createToonMaterial({ color: '#8b8b8f' }), positions, seed, footing),
+    instanced(pipe, createWorldMaterial({ color: '#9c5f3d' }), positions, seed, shape),
+    instanced(collar, createWorldMaterial({ color: '#5ea59c' }), positions, seed, shape),
+    instanced(basin, createWorldMaterial({ color: '#8b8b8f' }), positions, seed, footing),
     instanced(
       pool,
-      createToonMaterial({ color: '#5ec8c0', emissive: '#2c6f6b', emissiveIntensity: 0.6 }),
+      createWorldMaterial({ color: '#5ec8c0', emissive: '#2c6f6b', emissiveIntensity: 0.6 }),
       positions,
       seed,
       footing,
@@ -220,9 +220,9 @@ function buildBoardwalk(positions: THREE.Vector3[], seed: number): THREE.Instanc
   rope.translate(1.1, 1.0, 0.5);
 
   return [
-    instanced(planking, createToonMaterial({ color: '#a88a66' }), positions, seed, [0.8, 1.2]),
-    instanced(post, createToonMaterial({ color: '#6e5a44' }), positions, seed, [0.8, 1.2]),
-    instanced(rope, createToonMaterial({ color: '#d9c9a0' }), positions, seed, [0.8, 1.2]),
+    instanced(planking, createWorldMaterial({ color: '#a88a66' }), positions, seed, [0.8, 1.2]),
+    instanced(post, createWorldMaterial({ color: '#6e5a44' }), positions, seed, [0.8, 1.2]),
+    instanced(rope, createWorldMaterial({ color: '#d9c9a0' }), positions, seed, [0.8, 1.2]),
   ];
 }
 
@@ -252,18 +252,60 @@ function buildHuts(positions: THREE.Vector3[], seed: number): THREE.InstancedMes
   };
 
   return [
-    instanced(wall, createToonMaterial({ color: '#8a7a63' }), positions, seed, shape),
-    instanced(roof, createToonMaterial({ color: '#9c5f3c' }), positions, seed, shape),
-    instanced(chimney, createToonMaterial({ color: '#7d6a55' }), positions, seed, shape),
+    instanced(wall, createWorldMaterial({ color: '#8a7a63' }), positions, seed, shape),
+    instanced(roof, createWorldMaterial({ color: '#9c5f3c' }), positions, seed, shape),
+    instanced(chimney, createWorldMaterial({ color: '#7d6a55' }), positions, seed, shape),
   ];
+}
+
+const STONE = new THREE.Color('#827f78');
+const MOSS = new THREE.Color('#58693a');
+
+/**
+ * A weathered boulder: lumpy rather than cut, flat-bottomed so it sits in the
+ * ground instead of on it, with moss on whatever faces the sky.
+ *
+ * It was a twelve-faced dodecahedron, which under real light is a gemstone.
+ */
+function boulderGeometry(seed: number): THREE.BufferGeometry {
+  const ico = new THREE.IcosahedronGeometry(0.5, 2);
+  ico.deleteAttribute('normal');
+  ico.deleteAttribute('uv');
+  const rock = mergeVertices(ico);
+  ico.dispose();
+
+  const position = rock.getAttribute('position') as THREE.BufferAttribute;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < position.count; i++) {
+    v.fromBufferAttribute(position, i).normalize();
+    const lump = fbm3(v.x * 1.7, v.y * 1.7, v.z * 1.7, 3, 2.2, 0.5, seed);
+    v.multiplyScalar(0.5 * (0.72 + lump * 0.6));
+    v.y *= 0.62;
+    // Settle: the underside flattens into the soil.
+    if (v.y < -0.06) v.y = -0.06 + (v.y + 0.06) * 0.25;
+    position.setXYZ(i, v.x, v.y + 0.1, v.z);
+  }
+  rock.computeVertexNormals();
+
+  const normal = rock.getAttribute('normal') as THREE.BufferAttribute;
+  const colours = new Float32Array(position.count * 3);
+  const c = new THREE.Color();
+  for (let i = 0; i < position.count; i++) {
+    v.fromBufferAttribute(position, i);
+    const up = normal.getY(i);
+    const patch = fbm3(v.x * 6, v.y * 6, v.z * 6, 2, 2, 0.5, seed + 17);
+    const moss = THREE.MathUtils.smoothstep(up, 0.35, 0.85) * THREE.MathUtils.smoothstep(patch, 0.35, 0.6);
+    c.copy(STONE).multiplyScalar(0.85 + patch * 0.3).lerp(MOSS, moss * 0.85);
+    colours.set([c.r, c.g, c.b], i * 3);
+  }
+  rock.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+  return rock;
 }
 
 /** Scatter rocks — used everywhere to break up empty ground. */
 export function buildRocks(positions: THREE.Vector3[], seed: number): THREE.InstancedMesh {
-  const rock = new THREE.DodecahedronGeometry(0.45, 0);
-  rock.scale(1, 0.6, 1);
-  rock.translate(0, 0.2, 0);
-  return instanced(rock, createToonMaterial({ color: '#6b6a72' }), positions, seed, {
+  const rock = boulderGeometry(seed);
+  return instanced(rock, createWorldMaterial({ vertexColors: true, roughness: 0.94 }), positions, seed, {
     scaleRange: [0.5, 1.5],
     stretch: { x: 0.3, y: 0.35, z: 0.3 },
     tint: 0.14,
@@ -361,9 +403,9 @@ export function buildVillageSet(
   }
 
   return [
-    instanced(gate, createToonMaterial({ color: '#9c4a3c' }), forGate, seed + 11, shape),
-    instanced(lantern, createToonMaterial({ color: '#8f9098' }), forLantern, seed + 23, shape),
-    instanced(stall, createToonMaterial({ color: '#7d6a52' }), forStall, seed + 37, {
+    instanced(gate, createWorldMaterial({ color: '#9c4a3c' }), forGate, seed + 11, shape),
+    instanced(lantern, createWorldMaterial({ color: '#8f9098' }), forLantern, seed + 23, shape),
+    instanced(stall, createWorldMaterial({ color: '#7d6a52' }), forStall, seed + 37, {
       ...shape,
       tint: 0.18,
     }),
@@ -403,7 +445,7 @@ export function buildLighthouse(): { group: THREE.Group; lamp: THREE.Mesh; light
 
   const tower = new THREE.Mesh(
     new THREE.CylinderGeometry(1.1, 1.9, 11, 10),
-    createToonMaterial({ color: '#d9d2c4' }),
+    createWorldMaterial({ color: '#d9d2c4' }),
   );
   tower.position.y = 5.5;
   tower.castShadow = true;
@@ -411,21 +453,21 @@ export function buildLighthouse(): { group: THREE.Group; lamp: THREE.Mesh; light
 
   const band = new THREE.Mesh(
     new THREE.CylinderGeometry(1.16, 1.4, 2.2, 10),
-    createToonMaterial({ color: '#b3543a' }),
+    createWorldMaterial({ color: '#b3543a' }),
   );
   band.position.y = 4.2;
   group.add(band);
 
   const gallery = new THREE.Mesh(
     new THREE.CylinderGeometry(1.6, 1.6, 0.35, 10),
-    createToonMaterial({ color: '#4a4f60' }),
+    createWorldMaterial({ color: '#4a4f60' }),
   );
   gallery.position.y = 11;
   group.add(gallery);
 
   const lamp = new THREE.Mesh(
     new THREE.IcosahedronGeometry(0.95, 1),
-    createToonMaterial({
+    createWorldMaterial({
       color: '#3a3d52',
       emissive: '#f6e0b0',
       emissiveIntensity: 0,
@@ -436,7 +478,7 @@ export function buildLighthouse(): { group: THREE.Group; lamp: THREE.Mesh; light
 
   const cap = new THREE.Mesh(
     new THREE.ConeGeometry(1.2, 1.4, 10),
-    createToonMaterial({ color: '#4a4f60' }),
+    createWorldMaterial({ color: '#4a4f60' }),
   );
   cap.position.y = 13.1;
   group.add(cap);

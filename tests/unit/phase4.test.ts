@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { ParticleSystem } from '../../src/engine/vfx/ParticleSystem';
-import { toonGradient, createToonMaterial, createOutline } from '../../src/engine/render/ToonMaterial';
+import { createWorldMaterial } from '../../src/engine/render/WorldMaterial';
+import { installAtmosphere, atmosphereUniforms } from '../../src/engine/render/Atmosphere';
+import { styliseModel } from '../../src/engine/render/stylise';
 import { pickAudioFormat } from '../../src/engine/audio/formats';
 import { buildDistrictProps, buildLighthouse } from '../../src/game/entities/districtProps';
 import { DISTRICTS } from '../../src/data/content';
@@ -121,40 +123,58 @@ describe('ParticleSystem', () => {
   });
 });
 
-describe('toon shading', () => {
-  it('builds a banded gradient with hard steps', () => {
-    const gradient = toonGradient(3);
-    expect(gradient.image.width).toBe(3);
-    expect(gradient.magFilter).toBe(THREE.NearestFilter);
-
-    const data = gradient.image.data as Uint8Array;
-    // Monotonically increasing, and the darkest band stays off black so unlit
-    // faces still read as material rather than holes.
-    expect(data[0]).toBeGreaterThan(60);
-    expect(data[2]).toBeGreaterThan(data[0]!);
-  });
-
-  it('caches gradients per band count', () => {
-    expect(toonGradient(4)).toBe(toonGradient(4));
-    expect(toonGradient(4)).not.toBe(toonGradient(5));
-  });
-
-  it('creates a toon material carrying the gradient', () => {
-    const material = createToonMaterial({ color: '#ff0000', bands: 3 });
-    expect(material.gradientMap).toBe(toonGradient(3));
+describe('world shading', () => {
+  it('creates a matte physically based material', () => {
+    const material = createWorldMaterial({ color: '#ff0000' });
+    expect(material).toBeInstanceOf(THREE.MeshStandardMaterial);
     expect(material.color.getHexString()).toBe('ff0000');
+    // Almost nothing in a village is shiny; low roughness on wood reads as plastic.
+    expect(material.roughness).toBeGreaterThanOrEqual(0.8);
+    expect(material.metalness).toBe(0);
   });
 
-  it('builds an outline that shares geometry and renders back faces', () => {
-    const source = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
-    source.name = 'thing';
-    const outline = createOutline(source, 0.04);
+  it('carries emissive through, since the illumination system drives it', () => {
+    const material = createWorldMaterial({ emissive: '#e8a33a', emissiveIntensity: 0 });
+    expect(material.emissive.getHexString()).toBe('e8a33a');
+    expect(material.emissiveIntensity).toBe(0);
+  });
 
-    // Sharing geometry is the point: the hull costs no extra memory.
-    expect(outline.geometry).toBe(source.geometry);
-    expect((outline.material as THREE.MeshBasicMaterial).side).toBe(THREE.BackSide);
-    expect(outline.name).toBe('thing_outline');
-    expect(outline.castShadow).toBe(false);
+  it('keeps an import\'s maps but tames generator metalness', () => {
+    const normalMap = new THREE.Texture();
+    const source = new THREE.MeshStandardMaterial({ metalness: 1, roughness: 0.1, normalMap });
+    const root = new THREE.Group();
+    root.add(new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), source));
+
+    styliseModel(root, { height: 4 });
+    const mesh = root.children[0] as THREE.Mesh;
+    const converted = mesh.material as THREE.MeshStandardMaterial;
+
+    expect(converted).not.toBe(source);
+    expect(converted.normalMap).toBe(normalMap);
+    // A metallic roof under a blue sky is a mirror.
+    expect(converted.metalness).toBeLessThanOrEqual(0.15);
+    expect(converted.roughness).toBeGreaterThanOrEqual(0.55);
+  });
+});
+
+describe('atmosphere', () => {
+  it('replaces three\'s depth fog with the planetary atmosphere', () => {
+    installAtmosphere();
+    expect(THREE.ShaderChunk.fog_fragment).toContain('atmoSeaRadius');
+    expect(THREE.ShaderChunk.fog_vertex).toContain('vFogWorldPosition');
+  });
+
+  it('hands every program the same uniform objects', () => {
+    installAtmosphere();
+    const a = { uniforms: {} } as unknown as THREE.WebGLProgramParametersWithUniforms;
+    const b = { uniforms: {} } as unknown as THREE.WebGLProgramParametersWithUniforms;
+    const renderer = {} as THREE.WebGLRenderer;
+    new THREE.MeshBasicMaterial().onBeforeCompile(a, renderer);
+    new THREE.MeshStandardMaterial().onBeforeCompile(b, renderer);
+
+    // Shared by reference, so one write per frame reaches every material.
+    expect(a.uniforms.atmoSunDir).toBe(atmosphereUniforms.atmoSunDir);
+    expect(b.uniforms.atmoParams).toBe(atmosphereUniforms.atmoParams);
   });
 });
 

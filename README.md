@@ -5,7 +5,8 @@
 A cozy 3D browser game: you are a courier on the dimming planet of Fennwick,
 and every parcel you deliver relights a piece of the world.
 
-**Status: Phases 0–4 complete — playable, scored and cel-shaded.**
+**Status: Phases 0–4 complete, plus a painterly-realistic look — playable,
+scored, and lit like a Japanese valley at golden hour.**
 
 ```bash
 npm install
@@ -51,14 +52,32 @@ is authored in.
   plus a full SFX set — all synthesised by `tools/generate-audio.mjs`
 - **Particles**: pooled and instanced, one draw call — hand-off bursts, ignition
   motes, footstep puffs, landing dust
-- **Cel shading** with a generated gradient ramp, district silhouettes, and a
-  sky that warms as the planet comes back
-- 108 unit tests, two browser suites including a full scripted playthrough
+- **The look** ([`docs/24`](docs/24-cinematic-look.md)): physically based
+  materials lit by the sky as an environment map; height mist, aerial haze and
+  sun-glow scattering in every material; three lighting moods (overcast →
+  afternoon → golden hour) blended by progress; ~190k instanced grass clumps
+  with wind; procedural cherry, maple and cedar crowns; mirror-reflecting
+  water; MSAA, bloom, ACES and a film grade
+- Authored Japanese village (Meshy image-to-3D) and a VRM player character
+- 219 unit tests, two browser suites including a full scripted playthrough
 
-Total payload: **1.67 MB gzipped** (200 kB JS + 1.25 MB audio) against a 6 MB budget.
+Payload today: 0.3 MB gzipped JS, 6.6 MB of models, 2.2 MB of audio — and a
+16.5 MB player VRM, which alone breaks the 6 MB budget in `docs/04`. The new
+look added code, not downloads: grass, trees, leaf textures, sky and water are
+all generated at load.
 
-Not yet built: composed music, bloom, ambience beds, main menu, authored art.
+Not yet built: composed music, day/night and weather, photo mode.
 Phase 5 in [`docs/13-roadmap.md`](docs/13-roadmap.md).
+
+## Looking at it
+
+Lighting is judged in pictures, not numbers (dev server running):
+
+```bash
+node tools/shoot-moods.mjs out/     # 6 views × 3 moods, with frame times
+node tools/shoot-lagoon.mjs out/    # the water and its reflections
+node tools/shoot-world.mjs out/     # the original fixed viewpoints
+```
 
 ## Regenerating the audio
 

@@ -15,7 +15,18 @@ nothing about any of them.
 
 Budget for this world: under ~5k triangles for a prop, one material, 512 or
 1024 texture. Anything bigger is not "higher quality" here, it is a draw call
-and a memory cost buying detail that a cel shader throws away.
+and a memory cost buying detail that the haze and the screen size throw away.
+
+The world is physically shaded (docs/24): `styliseModel` keeps a model's
+normal, roughness, metalness and occlusion maps, not just its colour, so a
+generator run that includes them looks markedly better. It caps metalness at
+0.15 and floors roughness at 0.55 — generators like marking roofs metallic,
+and under a sky-lit environment a metal roof is a mirror.
+
+**Trees are not imported any more.** Cherry, maple and cedar are built in
+`game/world/Trees.ts` from leaf cards; generated tree hulls read as faceted
+rock under real light. `sakura.glb` and `momiji.glb` stay in the folder but
+nothing loads them. Bamboo is still the Meshy model.
 
 ## Hero buildings: concept first, then image-to-3D
 

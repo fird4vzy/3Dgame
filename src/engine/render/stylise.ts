@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { toonGradient } from './ToonMaterial';
 
 /**
  * Bring an imported model into this world.
@@ -8,17 +7,14 @@ import { toonGradient } from './ToonMaterial';
  * Generated and marketplace assets arrive as physically-shaded glTF at an
  * arbitrary scale, with the origin wherever the exporter felt like putting it.
  * Dropped straight into the scene they look *wrong* in three separate ways at
- * once — wrong size, floating or sunk, and shaded by a completely different
- * lighting model than everything around them — and the natural reaction is that
- * the asset is bad. It usually is not. It has simply never been converted.
+ * once — wrong size, floating or sunk, and lit by whatever their exporter
+ * guessed — and the natural reaction is that the asset is bad. It usually is
+ * not. It has simply never been converted.
  *
  * This is that conversion, and it exists as one function so that every import
  * gets the identical treatment. The moment two models come in through two
  * different paths, they stop looking like they belong to the same game, and no
  * amount of per-model fiddling puts that back.
- *
- * The screen-space ink outline applies to anything in the depth buffer, so
- * imported geometry gets outlined for free — nothing to do here for that.
  */
 
 export interface StyliseOptions {
@@ -39,15 +35,13 @@ export interface StyliseOptions {
    * orbit.
    */
   anchor?: 'feet' | 'centre';
-  /** Cel bands. Matches the rest of the world at 3. */
-  bands?: number;
   /**
    * Pull every colour this far toward the world palette, 0..1.
    *
-   * Imported art is almost always more saturated than a cel-shaded scene wants
-   * — see the note in `PlanetTerrain` about flat fills exaggerating saturation.
-   * A small pull toward a shared tint is what makes a set of models from
-   * different sources read as one art direction. 0 keeps the author's colours.
+   * Generated art arrives a little more saturated than the valley around it,
+   * and each generator run picks its own palette. A small pull toward a shared
+   * tint is what makes a set of models from different sources read as one art
+   * direction. 0 keeps the author's colours.
    */
   harmonise?: number;
   /** The colour `harmonise` pulls toward. */
@@ -63,27 +57,35 @@ const _size = new THREE.Vector3();
 const _centre = new THREE.Vector3();
 
 /**
- * Convert one material to the world's cel shading, keeping what matters.
+ * Convert one material to the world's shading, keeping everything it carries.
  *
- * The base colour map is carried over — that is the whole reason to buy a
- * textured model — while everything physical about the original is discarded,
- * because `MeshToonMaterial` has no use for roughness or metalness and keeping
- * them would only confuse anyone reading it later. Emissive survives, since the
- * illumination system drives emissive on lamps and it costs nothing to let an
- * imported lantern do the same.
+ * Physically based in, physically based out: the base colour map is the reason
+ * to buy a textured model, and any normal, roughness, metalness, occlusion or
+ * emissive maps it brings are kept, because under a sky-lit environment they
+ * are what separates carved wood from painted cardboard. What *is* normalised
+ * is the response — generators like to mark things metallic, and a metallic
+ * roof under a blue sky turns into a mirror — so metalness is capped and
+ * roughness floored to the matte range the rest of the village sits in.
+ * Emissive survives, since the illumination system drives emissive on lamps.
  */
-function toToon(source: THREE.Material, options: StyliseOptions): THREE.MeshToonMaterial {
+function toWorld(source: THREE.Material, options: StyliseOptions): THREE.MeshStandardMaterial {
   const from = source as THREE.MeshStandardMaterial;
 
-  const material = new THREE.MeshToonMaterial({
+  const material = new THREE.MeshStandardMaterial({
     color: from.color?.clone() ?? new THREE.Color('#ffffff'),
     map: from.map ?? null,
-    gradientMap: toonGradient(options.bands ?? 3),
+    normalMap: from.normalMap ?? null,
+    roughnessMap: from.roughnessMap ?? null,
+    metalnessMap: from.metalnessMap ?? null,
+    aoMap: from.aoMap ?? null,
+    roughness: Math.max(0.55, from.roughness ?? 0.85),
+    metalness: Math.min(0.15, from.metalness ?? 0),
     transparent: from.transparent ?? false,
     opacity: from.opacity ?? 1,
     alphaTest: from.alphaTest ?? 0,
     side: from.side ?? THREE.FrontSide,
   });
+  if (from.normalScale) material.normalScale.copy(from.normalScale);
 
   if (from.emissive) {
     material.emissive = from.emissive.clone();
@@ -96,7 +98,7 @@ function toToon(source: THREE.Material, options: StyliseOptions): THREE.MeshToon
     material.color.lerp(options.harmonyTint ?? DEFAULT_TINT, pull);
   }
 
-  material.name = `${source.name || 'imported'}_toon`;
+  material.name = `${source.name || 'imported'}_world`;
   return material;
 }
 
@@ -110,21 +112,21 @@ export function styliseModel(root: THREE.Object3D, options: StyliseOptions = {})
   // Materials first: converting after scaling would be identical, but doing it
   // first means the bounding box below is measured on the final materials, which
   // matters if any of them turn out to be double-sided.
-  const converted = new Map<THREE.Material, THREE.MeshToonMaterial>();
+  const converted = new Map<THREE.Material, THREE.MeshStandardMaterial>();
 
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
 
-    const replace = (material: THREE.Material): THREE.MeshToonMaterial => {
+    const replace = (material: THREE.Material): THREE.MeshStandardMaterial => {
       const existing = converted.get(material);
       if (existing) return existing;
-      const toon = toToon(material, options);
-      converted.set(material, toon);
+      const world = toWorld(material, options);
+      converted.set(material, world);
       // The original is ours to dispose: GLTFLoader created it for this scene
       // and nothing else references it.
       material.dispose();
-      return toon;
+      return world;
     };
 
     mesh.material = Array.isArray(mesh.material)

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createToonMaterial } from '@engine/render/ToonMaterial';
+import { createWorldMaterial } from '@engine/render/WorldMaterial';
 
 /**
  * The courier rig — one builder, many characters.
@@ -182,9 +182,8 @@ function mesh(
     opacity?: number;
   } = {},
 ): THREE.Mesh {
-  const material = createToonMaterial({
+  const material = createWorldMaterial({
     color: colour,
-    bands: 3,
     ...(options.emissive ? { emissive: options.emissive } : {}),
     ...(options.emissiveIntensity !== undefined
       ? { emissiveIntensity: options.emissiveIntensity }

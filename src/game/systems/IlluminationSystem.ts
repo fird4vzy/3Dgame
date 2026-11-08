@@ -17,6 +17,8 @@ const IGNITE_SECONDS = 3.0;
 const STEM_FADE_MS = 2500;
 
 const _colour = new THREE.Color();
+/** What a candle behind paper looks like. Every district's light leans to it. */
+const LANTERN = new THREE.Color('#ffc27a');
 
 /**
  * The core hook: delivering to a district wakes it up.
@@ -35,19 +37,14 @@ export class IlluminationSystem {
   private readonly dormant = new Map<DistrictId, THREE.Object3D[]>();
   private readonly igniting = new Map<DistrictId, number>();
 
-  /** Ambient light lifts as the planet comes back. */
-  private readonly ambient: THREE.HemisphereLight;
-  private readonly baseAmbient: number;
-
+  // The sky, sun and ambient follow total illumination too, but they belong to
+  // `Environment`, which reads it every frame. Owning them here as well meant
+  // two systems writing the same light.
   constructor(
     private readonly bus: EventBus,
     private readonly districts: DistrictRegistry,
     private readonly music: MusicDirector | null,
-    ambient: THREE.HemisphereLight,
-  ) {
-    this.ambient = ambient;
-    this.baseAmbient = ambient.intensity;
-  }
+  ) {}
 
   registerLamps(lamps: DistrictLamps): void {
     this.lampsByDistrict.set(lamps.district, lamps);
@@ -93,7 +90,6 @@ export class IlluminationSystem {
     for (const objects of this.dormant.values()) {
       for (const object of objects) object.visible = false;
     }
-    this.updateAmbient();
   }
 
   restore(litDistricts: readonly string[]): void {
@@ -105,7 +101,6 @@ export class IlluminationSystem {
       this.applyLight(runtime, 1);
       this.revealDormant(runtime.def.id);
     }
-    this.updateAmbient();
   }
 
   update(dt: number): void {
@@ -134,15 +129,16 @@ export class IlluminationSystem {
         this.igniting.set(district, next);
       }
     }
-
-    this.updateAmbient();
   }
 
   private applyLight(runtime: DistrictRuntime, level: number): void {
     const lamps = this.lampsByDistrict.get(runtime.def.id);
     if (!lamps) return;
 
-    _colour.set(runtime.def.litColour);
+    // The district's own colour, warmed most of the way to lantern light: a
+    // paper lantern glowing pure green or blue reads as a neon sign. Enough
+    // of the hue survives to tell the districts apart.
+    _colour.set(runtime.def.litColour).lerp(LANTERN, 0.6);
 
     for (let i = 0; i < lamps.lights.length; i++) {
       // Each lamp has its own delay, so they catch one after another.
@@ -182,13 +178,5 @@ export class IlluminationSystem {
 
   private revealDormant(district: DistrictId): void {
     for (const object of this.dormant.get(district) ?? []) object.visible = true;
-  }
-
-  /** Total illumination lifts the ambient so the whole planet warms up. */
-  private updateAmbient(): void {
-    const total = this.districts.all.reduce((sum, d) => sum + d.light, 0);
-    const fraction = total / Math.max(1, this.districts.all.length);
-    this.ambient.intensity = this.baseAmbient + fraction * 0.45;
-    this.ambient.color.set('#bcd3f0').lerp(new THREE.Color('#fbe6c4'), fraction * 0.6);
   }
 }

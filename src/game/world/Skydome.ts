@@ -1,129 +1,116 @@
 import * as THREE from 'three';
 import { PLANET_RADIUS } from '@config/constants';
 
-const _up = new THREE.Vector3();
-const _tanA = new THREE.Vector3();
-const _tanB = new THREE.Vector3();
-const _colour = new THREE.Color();
+/**
+ * What the sky looks like this frame. Owned and interpolated by
+ * `Environment`; the dome only draws it.
+ */
+export interface SkyState {
+  /** The viewer's local up — the horizon is perpendicular to it. */
+  up: THREE.Vector3;
+  /** The cloud deck's own frame, held steady as the player walks. */
+  tanA: THREE.Vector3;
+  tanB: THREE.Vector3;
+  /** Unit vector toward the sun. */
+  sunDir: THREE.Vector3;
+  /** Linear, HDR. Shared with the atmosphere so the two glows match. */
+  sunColour: THREE.Color;
+  /** Strength of the forward-scattering glow around the sun. */
+  glow: number;
+  zenith: THREE.Color;
+  mid: THREE.Color;
+  horizon: THREE.Color;
+  /** The colour distant air settles to; also the fog colour. */
+  haze: THREE.Color;
+  /** What the lower hemisphere is, for the environment capture. */
+  ground: THREE.Color;
+  cloudCover: number;
+  cloudLit: THREE.Color;
+  cloudShade: THREE.Color;
+  time: number;
+}
 
 /**
  * The sky.
  *
- * A shader dome rather than a flat clear colour, for a reason specific to this
+ * A shader dome rather than a background colour, for a reason specific to this
  * game: **the gradient axis has to follow the player's local up.** On a planet
- * you can walk right around, a sky whose horizon band is fixed to world +Y is
- * correct in exactly one place and visibly wrong everywhere else — you would
- * see the horizon glow overhead once you reached the poles.
+ * you can walk right around, a sky whose horizon is fixed to world +Y is correct
+ * in exactly one place.
  *
- * It is a *day* sky. The first version was a dusk that brightened into evening
- * as districts lit, on the reading that "a dark world" meant a dark sky — and
- * what that bought, in every screenshot, was a pale grey-white sheet: a dim
- * three-stop ramp with a warm band *added* on top at the horizon, then pushed
- * over the bloom threshold. The reference the game is chasing is a Ghibli
- * afternoon — a deep saturated blue overhead, cumulus with shaded undersides,
- * a warm pale horizon — and the premise survives the change: the unlit world
- * is that sky with the colour drained out of it and the clouds gone grey, and
- * each lit district puts the colour back.
+ * It is drawn around the *camera*, with every direction measured from it, so
+ * the sun disk lands exactly where the atmosphere's sun glow says it is. (It
+ * used to be measured from the planet centre, which is sixty metres away and
+ * puts the sun up to ten degrees off — invisible on a gradient, glaring once
+ * there is a disk and a halo to line up.)
  *
- * The clouds are procedural, drawn in the same pass. Billboards would need
- * anchoring to the player's tangent frame and would still read as cards; a
- * noise field projected onto a plane a few hundred metres up gives cumulus
- * that flatten and crowd towards the horizon the way real ones do, for one
- * extra lookup per sky pixel.
+ * Its in-scattering term is the same expression the atmosphere adds to every
+ * surface, so a hill in the haze and the sky behind it brighten toward the sun
+ * together and the horizon melts instead of cutting.
+ *
+ * The same class renders the environment capture (`envMode`): there the disk
+ * is dimmed so it does not seed a single blazing texel into every reflection,
+ * and the lower hemisphere is ground-coloured, so surfaces facing down are lit
+ * by bounce from the grass rather than by more sky.
  */
 export class Skydome {
   readonly mesh: THREE.Mesh;
   private readonly material: THREE.ShaderMaterial;
 
-  constructor() {
-    // Inside-out sphere, comfortably outside everything else in the scene.
-    const geometry = new THREE.SphereGeometry(PLANET_RADIUS * 5.5, 32, 24);
+  constructor(options: { envMode?: boolean; radius?: number } = {}) {
+    const geometry = new THREE.SphereGeometry(options.radius ?? PLANET_RADIUS * 5, 48, 32);
 
     this.material = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
+      depthTest: false,
       fog: false,
       uniforms: {
         uUp: { value: new THREE.Vector3(0, 1, 0) },
         uTanA: { value: new THREE.Vector3(1, 0, 0) },
         uTanB: { value: new THREE.Vector3(0, 0, 1) },
-        uIllumination: { value: 0 },
-
-        // Unlit — the planet as the player finds it.
-        //
-        // Still a blue sky, so the world keeps its silhouette and the horizon
-        // its place. What has gone is the saturation: overcast rather than
-        // night, a day with the colour turned down.
-        uZenithDark: { value: new THREE.Color('#4d80bf') },
-        uMidDark: { value: new THREE.Color('#86b0da') },
-        uHorizonDark: { value: new THREE.Color('#c8dbea') },
-        uGlowDark: { value: new THREE.Color('#e4dccd') },
-        // Lit — the reference afternoon. The zenith goes *darker* as the
-        // horizon brightens: contrast between them is the sky, brightness
-        // alone is exposure.
-        uZenithLit: { value: new THREE.Color('#2a6bc6') },
-        uMidLit: { value: new THREE.Color('#5ea6e8') },
-        uHorizonLit: { value: new THREE.Color('#bfe0f5') },
-        uGlowLit: { value: new THREE.Color('#fff0d2') },
-
-        // Dawn — the *reward*, not a clock. Only the last district brings it,
-        // and it is a golden hour laid over the afternoon rather than a
-        // different sky swapped in.
-        uDawn: { value: 0 },
-        uZenithDawn: { value: new THREE.Color('#2e63b4') },
-        uMidDawn: { value: new THREE.Color('#84b4e4') },
-        uHorizonDawn: { value: new THREE.Color('#ffd9b4') },
-        uGlowDawn: { value: new THREE.Color('#ffc088') },
-
-        // Clouds. Lit face and shaded underside, each for the unlit and the
-        // lit world; the shading is what makes them cumulus and not fog.
-        uCloudLitDark: { value: new THREE.Color('#eef1f5') },
-        uCloudShadeDark: { value: new THREE.Color('#a4b1c2') },
-        uCloudLitLit: { value: new THREE.Color('#fbfcff') },
-        uCloudShadeLit: { value: new THREE.Color('#a9bfd9') },
-        /** Fraction of the sky covered, 0..1. */
-        uCloudCover: { value: 0.46 },
-
-        /** Seconds, for the drift. */
+        uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+        uSunColour: { value: new THREE.Color(1, 1, 1) },
+        uGlow: { value: 0.6 },
+        uZenith: { value: new THREE.Color('#2a6bc6') },
+        uMid: { value: new THREE.Color('#5ea6e8') },
+        uHorizon: { value: new THREE.Color('#bfe0f5') },
+        uHaze: { value: new THREE.Color('#d8e2e8') },
+        uGround: { value: new THREE.Color('#4b5a3a') },
+        uCloudCover: { value: 0.45 },
+        uCloudLit: { value: new THREE.Color('#ffffff') },
+        uCloudShade: { value: new THREE.Color('#a9bfd9') },
         uTime: { value: 0 },
+        uEnvMode: { value: options.envMode ? 1 : 0 },
       },
       vertexShader: /* glsl */ `
-        varying vec3 vWorldDirection;
+        varying vec3 vViewRay;
         void main() {
           vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-          vWorldDirection = normalize(worldPosition.xyz);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          vViewRay = worldPosition.xyz - cameraPosition;
+          gl_Position = projectionMatrix * viewMatrix * worldPosition;
         }
       `,
       fragmentShader: /* glsl */ `
         uniform vec3 uUp;
         uniform vec3 uTanA;
         uniform vec3 uTanB;
-        uniform float uIllumination;
-        uniform vec3 uZenithDark;
-        uniform vec3 uMidDark;
-        uniform vec3 uHorizonDark;
-        uniform vec3 uGlowDark;
-        uniform vec3 uZenithLit;
-        uniform vec3 uMidLit;
-        uniform vec3 uHorizonLit;
-        uniform vec3 uGlowLit;
-        uniform float uDawn;
-        uniform vec3 uZenithDawn;
-        uniform vec3 uMidDawn;
-        uniform vec3 uHorizonDawn;
-        uniform vec3 uGlowDawn;
-        uniform vec3 uCloudLitDark;
-        uniform vec3 uCloudShadeDark;
-        uniform vec3 uCloudLitLit;
-        uniform vec3 uCloudShadeLit;
+        uniform vec3 uSunDir;
+        uniform vec3 uSunColour;
+        uniform float uGlow;
+        uniform vec3 uZenith;
+        uniform vec3 uMid;
+        uniform vec3 uHorizon;
+        uniform vec3 uHaze;
+        uniform vec3 uGround;
         uniform float uCloudCover;
+        uniform vec3 uCloudLit;
+        uniform vec3 uCloudShade;
         uniform float uTime;
+        uniform float uEnvMode;
 
-        varying vec3 vWorldDirection;
+        varying vec3 vViewRay;
 
-        // Value noise. Cheap, and cumulus does not need the anisotropy that
-        // simplex would buy.
         float hash(vec2 p) {
           p = fract(p * vec2(123.34, 456.21));
           p += dot(p, p + 45.32);
@@ -150,148 +137,101 @@ export class Skydome {
           return v;
         }
 
-        // Cloud density along a direction, 0..1, sampled on a layer a fixed
-        // height above the player's tangent plane.
+        // Cloud density along a direction, 0..1, on a deck above the viewer.
         float clouds(vec2 uv) {
           vec2 drift = vec2(uTime * 0.004, uTime * 0.0016);
-          // Big, round shapes first — cumulus are *blobs* — then a finer
-          // cauliflower edge that only bites where the blob is already thin.
+          // Round blobs first — cumulus are blobs — then a finer edge that only
+          // bites where the blob is already thin.
           float shape = fbm(uv * 0.55 + drift);
           float detail = fbm(uv * 2.4 - drift * 1.6 + 4.2);
           float d = shape + (detail - 0.5) * 0.22;
           float threshold = 1.0 - uCloudCover;
-          // A hard-ish edge: a soft one reads as haze, not as a cloud.
-          return smoothstep(threshold - 0.02, threshold + 0.11, d);
+          return smoothstep(threshold - 0.04, threshold + 0.16, d);
         }
 
         void main() {
-          vec3 dir = normalize(vWorldDirection);
+          vec3 dir = normalize(vViewRay);
+          float h = dot(dir, uUp);
+          float sun = max(dot(dir, uSunDir), 0.0);
+          float t = max(h, 0.0);
 
-          // Height relative to the *player's* horizon, not the world's.
-          float height = dot(dir, normalize(uUp));
+          // Horizon to zenith, with the change sitting low in the frame.
+          vec3 sky = mix(uHorizon, uMid, smoothstep(0.0, 0.35, pow(t, 0.8)));
+          sky = mix(sky, uZenith, smoothstep(0.28, 1.0, t));
 
-          vec3 zenith  = mix(uZenithDark,  uZenithLit,  uIllumination);
-          vec3 mid     = mix(uMidDark,     uMidLit,     uIllumination);
-          vec3 horizon = mix(uHorizonDark, uHorizonLit, uIllumination);
-          vec3 glow    = mix(uGlowDark,    uGlowLit,    uIllumination);
+          // The air between here and the horizon: every long sight-line ends in
+          // the same haze the fog gives the ground, so the two meet without a
+          // seam.
+          sky = mix(sky, uHaze, exp(-t * 9.0));
 
-          zenith  = mix(zenith,  uZenithDawn,  uDawn);
-          mid     = mix(mid,     uMidDawn,     uDawn);
-          horizon = mix(horizon, uHorizonDawn, uDawn);
-          glow    = mix(glow,    uGlowDawn,    uDawn);
-
-          // Three-stop gradient, eased so the transition sits low in the frame
-          // rather than splitting the sky in half.
-          float t = clamp(height * 0.5 + 0.5, 0.0, 1.0);
-          float k = pow(t, 0.7);
-          vec3 colour = mix(
-            mix(horizon, mid, smoothstep(0.0, 0.6, k)),
-            zenith,
-            smoothstep(0.6, 1.0, k)
-          );
-
-          // A warm band hugging the horizon — *mixed in*, never added. Adding
-          // light to an already-pale horizon is how the first sky went white.
-          float breathe = sin(uTime * 0.021) * 0.5 + sin(uTime * 0.0083) * 0.5;
-          float tightness = 6.0 - breathe * 1.2;
-          float band = exp(-abs(height) * tightness);
-          colour = mix(colour, glow, band * (0.35 + uDawn * 0.35));
-
-          // Clouds, on a plane above the player. Intersect the view ray with
-          // it; near the horizon the hit point runs off to infinity, which is
-          // exactly the crowding and flattening real cloud decks show.
-          if (height > 0.015) {
-            // High and large: the deck is far enough up that its shapes
-            // stay round overhead instead of foreshortening into streaks.
+          if (h > 0.01) {
             float layer = 700.0;
-            float dist = layer / height;
-            vec3 hit = dir * dist;
+            vec3 hit = dir * (layer / h);
             vec2 uv = vec2(dot(hit, uTanA), dot(hit, uTanB)) * 0.0014;
 
             float density = clouds(uv);
-            // Shade by re-sampling a little towards the sky: where the deck
-            // thickens above a pixel, that pixel is the underside.
-            float above = clouds(uv + vec2(0.05, 0.07));
-            float lit = smoothstep(-0.3, 0.4, density - above);
+            // Where the deck thickens toward the sun the pixel is in its own
+            // shadow; where it thins toward the sun, light gets through.
+            vec2 toSun = normalize(vec2(dot(uSunDir, uTanA), dot(uSunDir, uTanB)) + 1e-4);
+            float towardSun = clouds(uv + toSun * 0.06);
+            float lit = smoothstep(-0.35, 0.35, density - towardSun);
 
-            vec3 cloudLit   = mix(uCloudLitDark,   uCloudLitLit,   uIllumination);
-            vec3 cloudShade = mix(uCloudShadeDark, uCloudShadeLit, uIllumination);
-            // Golden hour warms the lit faces and turns the shade violet.
-            cloudLit   = mix(cloudLit,   vec3(1.0, 0.86, 0.72), uDawn * 0.6);
-            cloudShade = mix(cloudShade, vec3(0.72, 0.58, 0.66), uDawn * 0.6);
-            vec3 cloud = mix(cloudShade, cloudLit, lit);
+            vec3 cloud = mix(uCloudShade, uCloudLit, lit);
+            // Silver lining: thin cloud near the sun is lit through.
+            cloud += uSunColour * pow(sun, 5.0) * (1.0 - density) * 0.6;
+            // Distant cloud is seen through more air.
+            cloud = mix(cloud, uHaze, exp(-t * 5.0) * 0.7);
 
-            // Fade into the haze at the horizon and thin at the zenith, where
-            // a flat deck would otherwise read as a ceiling.
-            float horizonFade = smoothstep(0.03, 0.28, height);
-            float zenithThin = 1.0 - smoothstep(0.75, 1.0, height) * 0.35;
-            colour = mix(colour, cloud, density * horizonFade * zenithThin * 0.96);
+            float horizonFade = smoothstep(0.02, 0.24, h);
+            float zenithThin = 1.0 - smoothstep(0.75, 1.0, h) * 0.35;
+            sky = mix(sky, cloud, density * horizonFade * zenithThin * 0.95);
           }
 
-          // Below the horizon the dome is mostly hidden by the planet, but a
-          // sliver shows from hilltops; keep it dark so it reads as ground.
-          colour *= mix(0.6, 1.0, smoothstep(-0.35, 0.05, height));
+          // In-scattering toward the sun — the identical expression to the
+          // atmosphere's, so hills and sky warm together.
+          sky += uSunColour * (pow(sun, 8.0) * 0.55 + pow(sun, 48.0) * 0.45) * uGlow;
 
-          gl_FragColor = vec4(colour, 1.0);
+          // The disk, with a soft limb. Bright enough to bloom into the halo the
+          // eye expects; dimmed in the capture so reflections do not sparkle.
+          float disk = smoothstep(0.99962, 0.99988, sun);
+          sky += uSunColour * disk * mix(36.0, 2.0, uEnvMode);
+
+          // Below the horizon: in play the planet covers it, but a sliver shows
+          // from hilltops and it should read as distant ground. In the capture
+          // it is the ground the bounce light comes from.
+          float below = smoothstep(0.0, -0.1, h);
+          vec3 low = mix(mix(uHaze, uGround, 0.55), uGround, uEnvMode);
+          sky = mix(sky, low, below);
+
+          gl_FragColor = vec4(sky, 1.0);
         }
       `,
     });
 
     this.mesh = new THREE.Mesh(geometry, this.material);
-    this.mesh.name = 'skydome';
+    this.mesh.name = options.envMode ? 'skydome_capture' : 'skydome';
     // Drawn first, never culled — it surrounds everything.
     this.mesh.renderOrder = -1000;
     this.mesh.frustumCulled = false;
   }
 
-  /**
-   * @param up            The player's local up vector.
-   * @param illumination  0 = fully dark planet, 1 = every district lit.
-   */
-  update(up: THREE.Vector3, illumination: number, elapsed = 0): void {
-    _up.copy(up).normalize();
+  apply(state: SkyState): void {
     const u = this.material.uniforms;
-    (u.uUp!.value as THREE.Vector3).copy(_up);
-
-    // The cloud layer's own frame. Held to world +Y where possible so the deck
-    // does not spin as the player walks; it only has to flip near the poles.
-    _tanA.set(0, 1, 0).projectOnPlane(_up);
-    if (_tanA.lengthSq() < 1e-6) _tanA.set(1, 0, 0).projectOnPlane(_up);
-    _tanA.normalize();
-    _tanB.copy(_up).cross(_tanA).normalize();
-    (u.uTanA!.value as THREE.Vector3).copy(_tanA);
-    (u.uTanB!.value as THREE.Vector3).copy(_tanB);
-
-    u.uIllumination!.value = illumination;
-    u.uTime!.value = elapsed;
-
-    // Dawn begins only in the last stretch. Below 0.8 there is none at all, so
-    // four districts out of five still buys you afternoon — the golden hour
-    // belongs to the fifth delivery, and it should feel like that one earned it.
-    u.uDawn!.value = THREE.MathUtils.smoothstep(illumination, 0.8, 1.0);
-  }
-
-  /** How far into dawn the sky is, 0..1. */
-  get dawn(): number {
-    return this.material.uniforms.uDawn!.value as number;
-  }
-
-  /**
-   * The horizon *as drawn* — the base horizon stop with the glow band mixed in
-   * at full strength — so that fog set to it meets the sky without a seam.
-   */
-  horizonColour(target: THREE.Color, illumination: number): THREE.Color {
-    const u = this.material.uniforms;
-    const dawn = u.uDawn!.value as number;
-    target
-      .copy(u.uHorizonDark!.value as THREE.Color)
-      .lerp(u.uHorizonLit!.value as THREE.Color, illumination)
-      .lerp(u.uHorizonDawn!.value as THREE.Color, dawn);
-    _colour
-      .copy(u.uGlowDark!.value as THREE.Color)
-      .lerp(u.uGlowLit!.value as THREE.Color, illumination)
-      .lerp(u.uGlowDawn!.value as THREE.Color, dawn);
-    return target.lerp(_colour, 0.35 + dawn * 0.35);
+    (u.uUp!.value as THREE.Vector3).copy(state.up).normalize();
+    (u.uTanA!.value as THREE.Vector3).copy(state.tanA);
+    (u.uTanB!.value as THREE.Vector3).copy(state.tanB);
+    (u.uSunDir!.value as THREE.Vector3).copy(state.sunDir);
+    (u.uSunColour!.value as THREE.Color).copy(state.sunColour);
+    u.uGlow!.value = state.glow;
+    (u.uZenith!.value as THREE.Color).copy(state.zenith);
+    (u.uMid!.value as THREE.Color).copy(state.mid);
+    (u.uHorizon!.value as THREE.Color).copy(state.horizon);
+    (u.uHaze!.value as THREE.Color).copy(state.haze);
+    (u.uGround!.value as THREE.Color).copy(state.ground);
+    u.uCloudCover!.value = state.cloudCover;
+    (u.uCloudLit!.value as THREE.Color).copy(state.cloudLit);
+    (u.uCloudShade!.value as THREE.Color).copy(state.cloudShade);
+    u.uTime!.value = state.time;
   }
 
   dispose(): void {

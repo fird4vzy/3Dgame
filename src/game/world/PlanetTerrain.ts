@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { fbm3 } from '@core/math/rng';
-import { createToonMaterial } from '@engine/render/ToonMaterial';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { createWorldMaterial } from '@engine/render/WorldMaterial';
+import { applyAtmosphere } from '@engine/render/Atmosphere';
 import {
   PLANET_RADIUS,
   SEA_LEVEL_RADIUS,
@@ -40,6 +42,26 @@ const GRASS_LOW = new THREE.Color('#4a7a3c');
 const GRASS_HIGH = new THREE.Color('#8ec45c');
 
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+/** 3-D value noise in GLSL, 0..1. Cheap; nothing here needs gradient noise. */
+const VALUE_NOISE_GLSL = /* glsl */ `
+float valueHash3(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float valueNoise3(vec3 x) {
+  vec3 i = floor(x);
+  vec3 f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(valueHash3(i), valueHash3(i + vec3(1.0, 0.0, 0.0)), f.x),
+        mix(valueHash3(i + vec3(0.0, 1.0, 0.0)), valueHash3(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+    mix(mix(valueHash3(i + vec3(0.0, 0.0, 1.0)), valueHash3(i + vec3(1.0, 0.0, 1.0)), f.x),
+        mix(valueHash3(i + vec3(0.0, 1.0, 1.0)), valueHash3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y),
+    f.z);
+}
+`;
 
 /** Hermite ease between two edges — the GLSL one. */
 function smoothstep(edge0: number, edge1: number, x: number): number {
@@ -108,47 +130,96 @@ export class PlanetTerrain {
   readonly water: THREE.Mesh;
 
   constructor() {
-    const geometry = new THREE.IcosahedronGeometry(PLANET_RADIUS, TERRAIN_DETAIL);
+    // Smooth, not faceted. The icosphere arrives non-indexed with a normal per
+    // face, which is what gave the old planet its low-poly facets; welding the
+    // shared corners first lets computeVertexNormals average across faces, so
+    // hills roll instead of breaking into panels under a raking sun.
+    const ico = new THREE.IcosahedronGeometry(PLANET_RADIUS, TERRAIN_DETAIL);
+    ico.deleteAttribute('normal');
+    ico.deleteAttribute('uv');
+    const geometry = mergeVertices(ico, 1e-3);
+    ico.dispose();
     this.displace(geometry);
 
-    // Cel-banded, and still low-poly: the icosphere is non-indexed, so
-    // computeVertexNormals() yields per-face normals and the facets read flat
-    // without needing a flatShading flag (which MeshToonMaterial lacks anyway).
-    const material = createToonMaterial({ vertexColors: true, bands: 4 });
+    const material = createWorldMaterial({ vertexColors: true, roughness: 0.95 });
+    // Break the vertex colour up per pixel. Vertices are a metre and a half
+    // apart, and a smooth gradient between them is exactly what a lit field
+    // does *not* look like: real grass is patchy at every scale, warm where
+    // it has dried and dark where it is thick. Three octaves of world-space
+    // noise do that for no texture memory at all.
+    material.onBeforeCompile = (shader) => {
+      applyAtmosphere(shader);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vTerrainPos;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTerrainPos = position;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+varying vec3 vTerrainPos;
+${VALUE_NOISE_GLSL}`)
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          float tBroad = valueNoise3(vTerrainPos * 0.42);
+          float tMid = valueNoise3(vTerrainPos * 1.9 + 11.0);
+          float tFine = valueNoise3(vTerrainPos * 7.3 - 5.0);
+          diffuseColor.rgb *= 0.8 + tMid * 0.22 + tFine * 0.14;
+          diffuseColor.rgb = mix(
+            diffuseColor.rgb,
+            diffuseColor.rgb * vec3(1.12, 1.04, 0.8),
+            smoothstep(0.5, 0.85, tBroad) * 0.55
+          );`,
+        )
+        .replace(
+          '#include <roughnessmap_fragment>',
+          `#include <roughnessmap_fragment>
+          roughnessFactor = clamp(roughnessFactor - tFine * 0.12, 0.0, 1.0);`,
+        );
+    };
 
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.name = 'terrain';
     this.mesh.receiveShadow = true;
     this.mesh.castShadow = true;
 
-    const waterGeometry = new THREE.IcosahedronGeometry(SEA_LEVEL_RADIUS, 5);
-    // A clear lagoon blue under a day sky. The old teal was mixed for dusk
-    // and under daylight read as grey-green paint.
-    const waterMaterial = createToonMaterial({
-      color: '#3b98c4',
-      bands: 3,
+    const waterGeometry = new THREE.IcosahedronGeometry(SEA_LEVEL_RADIUS, 24);
+    // Glassy and deep. Most of what water *is*, visually, is the sky it
+    // reflects — at a grazing angle almost all of it — so the surface is
+    // nearly mirror-smooth and the body colour is a dark teal that only shows
+    // looking down into it.
+    const waterMaterial = createWorldMaterial({
+      color: '#1d5a6b',
       transparent: true,
-      opacity: 0.82,
+      opacity: 0.9,
+      roughness: 0.07,
     });
 
-    // Move the surface in the vertex shader.
+    // Swell in the vertex shader, ripples in the fragment shader.
     //
-    // A still sphere reads as painted glass, and it was the one thing in the
-    // world with no motion at all. Two crossed sine waves in world space are
-    // enough — the eye is looking for *change*, not for correct fluid dynamics,
-    // and the amplitude is centimetres.
+    // The swell is centimetres of crossed sine waves — the eye wants *change*,
+    // not fluid dynamics — and it has to run on the GPU: walking every vertex
+    // on the CPU each frame to move it a few centimetres is the kind of cost
+    // that never shows up as one big number and quietly eats the frame.
     //
-    // It has to happen on the GPU. This is a detail-5 icosphere, and walking
-    // ten thousand vertices on the CPU every frame to move them a few
-    // centimetres is exactly the kind of cost that never shows up in a profile
-    // as one big number and quietly eats a third of the frame.
+    // The ripples are a perturbed normal: six travelling wave trains at
+    // different headings and lengths, long ones slow and short ones quick, as
+    // water waves are. (A noise gradient was tried first and read as leopard
+    // spots: noise has blobs, water has crests.) A whisper of noise on top
+    // stops the trains lining up into a visible lattice.
     //
-    // `onBeforeCompile` rather than a custom material, so the toon banding,
-    // fog and shadows all keep working.
+    // Reflections: the environment map supplies the sky everywhere; where a
+    // mirror pass ran this frame (see WaterReflection) its image replaces the
+    // sky in the specular term, so the gate and the shore stand in the water
+    // upside down, rippled by the same normal, under the same Fresnel.
+    waterMaterial.envMapIntensity = 1;
     waterMaterial.onBeforeCompile = (shader) => {
+      applyAtmosphere(shader);
       shader.uniforms.uTime = this.waterTime;
+      Object.assign(shader.uniforms, this.waterUniforms);
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nuniform float uTime;')
+        .replace(
+          '#include <common>',
+          '#include <common>\nuniform float uTime;\nuniform mat4 uReflectionMatrix;\nvarying vec3 vWaterPos;\nvarying vec4 vReflectionCoord;',
+        )
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
@@ -157,16 +228,84 @@ export class PlanetTerrain {
              sin(transformed.x * 0.55 + uTime * 0.9) * 0.5 +
              sin(transformed.z * 0.41 - uTime * 0.7) * 0.5 +
              sin((transformed.x + transformed.y) * 0.23 + uTime * 0.35);
-           transformed += swellDir * swell * 0.085;`,
+           transformed += swellDir * swell * 0.05;
+           vWaterPos = transformed;
+           vReflectionCoord = uReflectionMatrix * vec4(transformed, 1.0);`,
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+uniform float uTime;
+uniform sampler2D uReflection;
+uniform float uReflectionOn;
+varying vec3 vWaterPos;
+varying vec4 vReflectionCoord;
+${VALUE_NOISE_GLSL}
+// Gradient of a sum of travelling waves, in world space.
+vec3 waveGradient(vec3 p) {
+  vec3 dirs[6] = vec3[6](
+    normalize(vec3(1.0, 0.2, 0.3)), normalize(vec3(-0.4, 0.1, 1.0)),
+    normalize(vec3(0.7, -0.6, -0.5)), normalize(vec3(-0.9, 0.5, -0.2)),
+    normalize(vec3(0.2, 0.9, -0.7)), normalize(vec3(0.5, -0.3, 0.8))
+  );
+  float lengths[6] = float[6](3.1, 2.1, 1.45, 0.95, 0.63, 0.41);
+  vec3 g = vec3(0.0);
+  for (int i = 0; i < 6; i++) {
+    float k = 6.2831853 / lengths[i];
+    float speed = sqrt(9.8 / k) * 0.6;
+    float phase = dot(p, dirs[i]) * k - uTime * speed * k;
+    g += dirs[i] * (lengths[i] * 0.008 * k * cos(phase));
+  }
+  return g;
+}`)
+        .replace(
+          '#include <normal_fragment_maps>',
+          `#include <normal_fragment_maps>
+          vec3 waterTilt;
+          {
+            vec3 wUp = normalize(vWaterPos);
+            vec3 g = waveGradient(vWaterPos);
+            float e = 0.12;
+            vec3 q = vWaterPos * 2.3 + vec3(uTime * 0.2, -uTime * 0.15, uTime * 0.17);
+            float n0 = valueNoise3(q);
+            g += vec3(
+              valueNoise3(q + vec3(e, 0.0, 0.0)) - n0,
+              valueNoise3(q + vec3(0.0, e, 0.0)) - n0,
+              valueNoise3(q + vec3(0.0, 0.0, e)) - n0
+            ) / e * 0.02;
+            g -= wUp * dot(g, wUp);
+            waterTilt = g;
+            vec3 wNormal = normalize(wUp - g);
+            normal = normalize((viewMatrix * vec4(wNormal, 0.0)).xyz);
+          }`,
+        )
+        .replace(
+          '#include <lights_fragment_maps>',
+          `#include <lights_fragment_maps>
+          #if defined( RE_IndirectSpecular )
+          if (uReflectionOn > 0.5) {
+            vec2 reflUv = vReflectionCoord.xy / vReflectionCoord.w;
+            // Ripples bend the mirror image, in screen terms.
+            reflUv += (viewMatrix * vec4(waterTilt, 0.0)).xy * 0.07;
+            radiance = texture2D(uReflection, reflUv).rgb;
+          }
+          #endif`,
         );
     };
 
     this.water = new THREE.Mesh(waterGeometry, waterMaterial);
     this.water.name = 'water';
+    this.water.receiveShadow = true;
   }
 
   /** Shared with the water shader; advanced by `update`. */
   private readonly waterTime = { value: 0 };
+
+  /** Written by WaterReflection, read by the water shader. */
+  readonly waterUniforms = {
+    uReflection: { value: null as THREE.Texture | null },
+    uReflectionMatrix: { value: new THREE.Matrix4() },
+    uReflectionOn: { value: 0 },
+  };
 
   /** Advance the swell. Called once a frame. */
   update(dt: number): void {
@@ -283,6 +422,25 @@ export class PlanetTerrain {
   static padAt(position: THREE.Vector3, flat: number, blend = flat + 3): TerrainPad {
     const direction = position.clone().normalize();
     return { direction, height: PlanetTerrain.heightAt(direction), flat, blend };
+  }
+
+  /**
+   * 0..1, how much of something's footprint covers a surface direction —
+   * full under the walls of a house or the base of a gate, nothing past its
+   * flat. The lagoon's pad is not a footprint and is skipped.
+   */
+  static footprintAt(direction: THREE.Vector3): number {
+    const d = _dir.copy(direction).normalize();
+    let strongest = 0;
+    for (const pad of PlanetTerrain.pads) {
+      if (pad.merge === false) continue;
+      const cosA = d.dot(pad.direction);
+      if (cosA < pad.cosOuter) continue;
+      const distance = Math.acos(Math.min(1, cosA)) * PLANET_RADIUS;
+      const weight = 1 - smoothstep(pad.flat * 0.7, pad.flat * 1.05, distance);
+      if (weight > strongest) strongest = weight;
+    }
+    return strongest;
   }
 
   /** 0..1, how much of a painted track lies under a surface direction. */
@@ -424,6 +582,10 @@ export class PlanetTerrain {
     const normal = geometry.getAttribute('normal') as THREE.BufferAttribute;
     const count = position.count;
     const colors = new Float32Array(count * 3);
+    // Where the grass field grows, 0..1. Decided here because this is where
+    // the ground already knows what it is — a beach, a rock face, a track, a
+    // floor — and the field should never disagree with the paint under it.
+    const grass = new Float32Array(count);
 
     const v = new THREE.Vector3();
     const n = new THREE.Vector3();
@@ -485,9 +647,22 @@ export class PlanetTerrain {
       colors[i * 3] = colour.r;
       colors[i * 3 + 1] = colour.g;
       colors[i * 3 + 2] = colour.b;
+
+      // Thin on the dunes, none on sand, rock or a worn track, none under a
+      // house; and patchy everywhere, because an even lawn is a golf course.
+      const patchy = 0.55 + 0.45 * clamp01(0.5 + drift * 1.1);
+      grass[i] = clamp01(
+        (1 - sand) *
+          (1 - meadow * 0.45) *
+          (1 - stone) *
+          (1 - track * 0.92) *
+          (1 - PlanetTerrain.footprintAt(v) * 0.95) *
+          patchy,
+      );
     }
 
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('grass', new THREE.BufferAttribute(grass, 1));
   }
 }
 

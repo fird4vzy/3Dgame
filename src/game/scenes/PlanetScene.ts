@@ -8,8 +8,8 @@ import type { RendererService } from '@engine/render/RendererService';
 import type { MusicDirector } from '@engine/audio/MusicDirector';
 import type { IScene } from '@engine/scene/IScene';
 import type { LoadedCharacter } from '@engine/character/CharacterFactory';
-import { shouldBeVisible, horizonDistance } from '@core/math/spherical';
-import { PLANET_RADIUS, PLAYER_HEIGHT, SEA_LEVEL_RADIUS } from '@config/constants';
+import { shouldBeVisible } from '@core/math/spherical';
+import { PLANET_RADIUS, PLAYER_HEIGHT, SEA_LEVEL_RADIUS, WORLD_SEED } from '@config/constants';
 
 import { PlanetTerrain } from '@game/world/PlanetTerrain';
 import { DistrictRegistry } from '@game/world/DistrictRegistry';
@@ -49,7 +49,11 @@ import { buildGroundCover } from '@game/entities/groundCover';
 import { Cats, catSpots } from '@game/entities/cats';
 import { loadInstancedProp, type InstancedPropOptions } from '@engine/render/instancedProp';
 import { loadStylisedModel } from '@engine/render/stylise';
-import { Skydome, createStarfield } from '@game/world/Skydome';
+import { createStarfield } from '@game/world/Skydome';
+import { Environment } from '@game/world/Environment';
+import { GrassField } from '@game/world/GrassField';
+import { plantTrees, updateTrees, type TreeSpecies } from '@game/world/Trees';
+import { WaterReflection } from '@game/world/WaterReflection';
 import type { MinimapMarker } from '@game/world/mapMarkers';
 import { buildCourier, type RenRig } from '@game/entities/CourierCharacter';
 import { VILLAGER_SPECS } from '@game/entities/characterSpec';
@@ -61,8 +65,6 @@ import { DISTRICTS, NPCS, npcById, type DistrictId, type ParcelWeight } from '..
 
 const _forward = new THREE.Vector3();
 const _sunUp = new THREE.Vector3();
-const _sunTangent = new THREE.Vector3();
-const _sunDir = new THREE.Vector3();
 const _charFacing = new THREE.Vector3();
 const _characterUp = new THREE.Vector3();
 const _camForward = new THREE.Vector3();
@@ -75,13 +77,29 @@ const _emitPos = new THREE.Vector3();
 const DUST_COLOUR = new THREE.Color('#b9ae94');
 /** Matches the shard mesh's emissive, so the burst reads as the shard itself. */
 const SHARD_COLOUR = new THREE.Color('#f6bd60');
-const _skyUp = new THREE.Vector3();
 const _fillRight = new THREE.Vector3();
 const _lightAnchor = new THREE.Vector3();
 const _villagerUp = new THREE.Vector3();
 const _villagerTo = new THREE.Vector3();
 const _villagerFwd = new THREE.Vector3();
 const _villagerRight = new THREE.Vector3();
+
+/**
+ * Directions over the planet where the ground is under the sea — a Fibonacci
+ * sphere, kept where the water is at least ankle-deep. Coarse on purpose: it
+ * only has to say "is there water in front of the camera".
+ */
+function openWater(samples: number): THREE.Vector3[] {
+  const wet: THREE.Vector3[] = [];
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < samples; i++) {
+    const y = 1 - ((i + 0.5) / samples) * 2;
+    const r = Math.sqrt(1 - y * y);
+    const direction = new THREE.Vector3(Math.cos(golden * i) * r, y, Math.sin(golden * i) * r);
+    if (PlanetTerrain.heightAt(direction) < SEA_LEVEL_RADIUS - 0.1) wet.push(direction);
+  }
+  return wet;
+}
 
 export interface PlanetSceneCallbacks {
   onDistrictChanged?(id: DistrictId, displayName: string): void;
@@ -131,15 +149,17 @@ export class PlanetScene implements IScene {
   private readonly npcObjects = new Map<string, THREE.Object3D>();
   private readonly thermals: THREE.Vector3[] = [];
   private readonly cameraOccluders: THREE.Object3D[] = [];
-  private sun!: THREE.DirectionalLight;
-  private ambient!: THREE.HemisphereLight;
+  /** Sky, sun, air and the light they cast. */
+  private environment!: Environment;
+  private grass: GrassField | null = null;
+  private waterReflection: WaterReflection | null = null;
+  /** Set once onEnter has handed the rig its occluders; later trunks register themselves. */
+  private occludersRegistered = false;
   /** Short-range lights that follow the player, so she reads in the dark. */
   private characterFill!: THREE.PointLight;
   private characterRim!: THREE.PointLight;
   private lighthouse: { lamp: THREE.Mesh; light: THREE.PointLight } | null = null;
   private stars: THREE.Points | null = null;
-  private skyLevel = -1;
-  private skydome!: Skydome;
   /** Resident rigs, for the idle sway. */
   private villagerRigs: Array<{ rig: RenRig; phase: number; body: THREE.Object3D }> = [];
   /** Authored residents: whole-body idle, since an imported mesh has no bones. */
@@ -167,13 +187,6 @@ export class PlanetScene implements IScene {
   private lastDelta = 1 / 60;
   private menuMode = false;
   private menuOrbit = 0;
-  /** Ground fog, parked while the orbital menu shot is on screen. */
-  private gameFog: THREE.Fog | null = null;
-  /** Fog range before altitude scales it. See updateValleyFog. */
-  private fogBaseNear = 15;
-  private fogBaseFar = 76;
-  /** Smoothed 0.75..1.2 multiplier on that range. */
-  private fogOpenness = 1;
   /** Seconds since the run began, for the slow drift in the sky. */
   private skyClock = 0;
 
@@ -206,12 +219,7 @@ export class PlanetScene implements IScene {
     this.buildCast();
     this.buildShardsAndThermals();
 
-    this.illumination = new IlluminationSystem(
-      this.bus,
-      this.districts,
-      this.music,
-      this.ambient,
-    );
+    this.illumination = new IlluminationSystem(this.bus, this.districts, this.music);
     this.registerDistrictLamps();
 
     this.delivery = new DeliverySystem(
@@ -234,6 +242,7 @@ export class PlanetScene implements IScene {
     });
 
     this.rig.addOccluders(this.cameraOccluders);
+    this.occludersRegistered = true;
 
     this.quests.reevaluate();
     this.bus.emit('scene:entered', { id: this.id });
@@ -310,7 +319,9 @@ export class PlanetScene implements IScene {
     // The shadow frustum is sized tightly around the player for gameplay. From
     // the menu's orbital camera that box is visible as a hard rectangular seam
     // across the planet, so shadows come off entirely while in orbit.
-    if (this.sun) this.sun.castShadow = !active && this.renderer.renderer.shadowMap.enabled;
+    if (this.environment) {
+      this.environment.sun.castShadow = !active && this.renderer.renderer.shadowMap.enabled;
+    }
     if (!active) {
       this.player.object3D.getWorldDirection(_forward);
       this.rig.reset(this.controller.smoothedPosition, _forward);
@@ -319,7 +330,7 @@ export class PlanetScene implements IScene {
 
   /** How far into dawn the sky is, for tooling and tests. */
   get skydomeDawn(): number {
-    return this.skydome?.dawn ?? 0;
+    return this.environment?.dawn ?? 0;
   }
 
   get isMenuMode(): boolean {
@@ -380,17 +391,18 @@ export class PlanetScene implements IScene {
     if (this.paused) return;
     this.lastDelta = dt;
     this.world.update(dt);
-    this.updateSun();
+    this.updateCharacterLights();
     this.illumination.update(dt);
     this.shards.update(dt, this.player.object3D.position);
     this.syncCharacterAnimation(dt);
     this.updateCharacterTint();
     this.updateVillagers(dt);
     this.terrain.update(dt);
+    updateTrees(dt);
+    this.grass?.update(dt, this.controller.smoothedPosition, this.renderer.camera);
     this.cats?.update(dt, this.player.object3D.position);
     this.updateFireflies(dt);
     this.updatePetals(dt);
-    this.updateValleyFog(dt);
     this.updateParcelVisual(dt);
     this.updateLighthouse();
     this.updateSteam(dt);
@@ -411,10 +423,19 @@ export class PlanetScene implements IScene {
     if (this.menuMode) {
       this.updateMenuCamera(dt);
     } else {
-      // Put the ground fog back the moment play starts.
-      if (this.gameFog && !this.world.scene.fog) this.world.scene.fog = this.gameFog;
       this.rig.update(dt, this.controller.smoothedPosition);
     }
+    // After the camera has moved: the sky is centred on it.
+    this.environment.update(
+      {
+        anchor: this.controller.smoothedPosition,
+        camera: this.renderer.camera,
+        illumination: this.illuminationFraction,
+        elapsed: this.skyClock,
+        menu: this.menuMode,
+      },
+      dt,
+    );
     this.cullBelowHorizon();
 
     if (this.character) {
@@ -424,11 +445,22 @@ export class PlanetScene implements IScene {
   }
 
   render(): void {
+    // The mirror first: the water samples it in the main pass.
+    if (!this.menuMode && !this.renderer.isContextLost) {
+      this.waterReflection?.render(
+        this.world.scene,
+        this.renderer.camera,
+        this.terrain.water,
+        this.lastDelta,
+      );
+    }
     this.renderer.render(this.world.scene, this.lastDelta);
   }
 
   dispose(): void {
-    this.skydome.dispose();
+    this.environment.dispose();
+    this.grass?.dispose();
+    this.waterReflection?.dispose();
     this.fireflies.dispose();
     this.particles.dispose();
     this.character?.dispose();
@@ -499,23 +531,17 @@ export class PlanetScene implements IScene {
 
   private buildEnvironment(): void {
     const scene = this.world.scene;
-    // No flat clear colour: the dome's gradient follows the player's local up,
-    // which a fixed background cannot do on a planet you can walk right around.
-    // Fog range is set from the planet, not picked by eye.
-    //
-    // This was `Fog(40, 190)` — numbers that belong to a flat world. On a
-    // 60 m sphere the horizon from eye height is `sqrt(2Rh)` ≈ 13.9 m, so
-    // *nothing in view was ever far enough away to be fogged at all* and the
-    // terrain cut against the sky at a razor edge with no depth whatsoever.
-    // That single mismatch is most of why the world looked flat.
-    //
-    // Deriving it from `horizonDistance` also means it stays correct if the
-    // planet is ever resized.
-    const horizon = horizonDistance(PLANET_RADIUS, PLAYER_HEIGHT);
-    scene.fog = new THREE.Fog('#1b2033', horizon * 1.1, horizon * 5.5);
-
-    this.skydome = new Skydome();
-    scene.add(this.skydome.mesh);
+    // No flat clear colour and no flat fog: the sky's gradient follows the
+    // player's local up, and the air thickens toward sea level, neither of
+    // which a fixed background or depth fog can do on a planet you can walk
+    // right around. See Environment and engine/render/Atmosphere.
+    const shadows = this.renderer.renderer.shadowMap.enabled;
+    this.environment = new Environment(
+      scene,
+      this.renderer.renderer,
+      shadows,
+      this.renderer.tier === 'high' ? 2048 : 1024,
+    );
 
     this.fireflies = new Fireflies();
     scene.add(this.fireflies.mesh);
@@ -526,6 +552,21 @@ export class PlanetScene implements IScene {
     scene.add(this.terrain.mesh);
     scene.add(this.terrain.water);
     this.collision.build(this.terrain.mesh);
+
+    // After the terrain is painted: the field grows where the paint says
+    // grass, and nowhere else. Thinner on weaker tiers — it is the single
+    // largest thing in the frame by triangle count.
+    const density = { low: 1.8, medium: 4.2, high: 6.5 }[this.renderer.tier];
+    this.grass = new GrassField(this.terrain.mesh.geometry, WORLD_SEED + 5, density);
+    scene.add(this.grass.group);
+
+    this.waterReflection = new WaterReflection(
+      this.renderer.renderer,
+      this.terrain.waterUniforms,
+      SEA_LEVEL_RADIUS,
+      this.renderer.tier,
+    );
+    this.waterReflection.setWetPoints(openWater(3000));
     this.addStars(scene);
     scene.add(this.particles.mesh);
   }
@@ -533,25 +574,6 @@ export class PlanetScene implements IScene {
   private buildLighting(): void {
     const scene = this.world.scene;
 
-    // Daylight. The sky is blue and the grass bounces green back up; the
-    // unlit world is this with the colour turned down, not a night. See the
-    // note on Skydome for why the dusk reading was abandoned.
-    this.ambient = new THREE.HemisphereLight(0xbcd3f0, 0x55654a, 0.85);
-    scene.add(this.ambient);
-
-    this.sun = new THREE.DirectionalLight(0xfff1dc, 2.1);
-    this.sun.castShadow = this.renderer.renderer.shadowMap.enabled;
-    if (this.sun.castShadow) {
-      this.sun.shadow.mapSize.set(1024, 1024);
-      const cam = this.sun.shadow.camera;
-      cam.near = 1;
-      cam.far = 160;
-      cam.left = cam.bottom = -25;
-      cam.right = cam.top = 25;
-      cam.updateProjectionMatrix();
-      this.sun.shadow.bias = -0.0004;
-      this.sun.shadow.normalBias = 0.06;
-    }
     // A key light that belongs to the character, not to the world.
     //
     // The premise puts the player in an unlit district for the whole opening,
@@ -577,8 +599,6 @@ export class PlanetScene implements IScene {
     // from the background rather than merely brightening her.
     this.characterRim = new THREE.PointLight(0xffd2a0, 0.3, 4.5, 2);
     scene.add(this.characterRim);
-
-    scene.add(this.sun, this.sun.target);
   }
 
   private buildPlayer(): void {
@@ -692,7 +712,9 @@ export class PlanetScene implements IScene {
       if (def.id === 'landing' || def.id === 'bramblewood') {
         IMPORTS.forEach(([name, height], slot) => {
           const spots = propSpots.filter((_, i) => i % IMPORTS.length === slot);
-          void this.addImportedProp(name, spots, height, def.id.length * 1300 + slot * 97);
+          const seed = def.id.length * 1300 + slot * 97;
+          if (name === 'sakura' || name === 'momiji') this.addTrees(name, spots, height, seed);
+          else void this.addImportedProp(name, spots, height, seed);
         });
       } else {
         for (const mesh of buildDistrictProps(def.id, propSpots, def.id.length * 331)) {
@@ -1073,58 +1095,17 @@ export class PlanetScene implements IScene {
   }
 
   /**
-   * The sky warms as the planet comes back.
-   *
-   * Background, fog and star brightness all track total illumination, so the
-   * change is visible even when you are standing in a district that is still
-   * dark — the whole world is coming back, not just the block you are on.
+   * The sky itself is the Environment's; what is left here is the clock that
+   * drifts the clouds, and the stars, which only the orbital menu shot shows.
    */
   private updateSky(): void {
-    const total = this.districts.all.reduce((sum, d) => sum + d.light, 0);
-    const fraction = total / Math.max(1, this.districts.all.length);
-
-    // The gradient axis is the player's local up — walk far enough and world +Y
-    // stops meaning "overhead". This has to run every frame because the player
-    // moves; the palette work below only runs when illumination changes.
-    _skyUp.copy(this.controller.smoothedPosition).normalize();
     this.skyClock += this.lastDelta;
-    this.skydome.update(_skyUp, fraction, this.skyClock);
-
-    // Stars fade as the morning comes up, on top of the fade they already do
-    // as districts light. Two reasons to lose them, and the second one only
-    // arrives at the very end.
-    // No stars in a day sky. Kept built, since the menu's orbital shot still
-    // wants them against space.
     if (this.stars) {
       const material = this.stars.material as THREE.PointsMaterial;
       material.opacity = this.menuMode ? 0.9 : 0;
       material.transparent = true;
+      this.stars.visible = this.menuMode;
     }
-
-    if (Math.abs(fraction - this.skyLevel) < 0.002) return;
-    this.skyLevel = fraction;
-
-    const fog = this.world.scene.fog as THREE.Fog | null;
-    if (fog) {
-      // Fog must match the horizon band, or the terrain edge cuts against it
-      // — but against the horizon *as drawn*, which the dome darkens as it
-      // approaches the ground. Matching the raw uniform instead washes the
-      // whole surface out to a flat pale sheet, which is what it did.
-      this.skydome.horizonColour(fog.color, fraction).multiplyScalar(0.94);
-      // Visibility opens up as the world lights: dusk hides the far side.
-      //
-      // Stored rather than written straight to the fog, because `updateValleyFog`
-      // scales these every frame and would otherwise be overwriting its own
-      // input — the classic way a per-frame modulation quietly becomes a
-      // runaway.
-      const horizon = horizonDistance(PLANET_RADIUS, PLAYER_HEIGHT);
-      // Daylight is *clear*. Aerial perspective starts past the horizon
-      // and only fully takes over well beyond it; the old dusk range turned
-      // a house ten metres off into a pale silhouette.
-      this.fogBaseNear = horizon * (2.2 + fraction * 0.6);
-      this.fogBaseFar = horizon * (9 + fraction * 3);
-    }
-
   }
 
   /** A mote burst at every lamp in a district as it wakes. */
@@ -1157,7 +1138,7 @@ export class PlanetScene implements IScene {
   private updateLighthouse(): void {
     if (!this.lighthouse) return;
     const level = this.districts.get('spire').light;
-    const material = this.lighthouse.lamp.material as THREE.MeshToonMaterial;
+    const material = this.lighthouse.lamp.material as THREE.MeshStandardMaterial;
     material.emissiveIntensity = level * 2.2;
     // Same physical-units correction as the street lamps, and more of it: the
     // lighthouse is the one landmark meant to be visible across the district.
@@ -1169,16 +1150,8 @@ export class PlanetScene implements IScene {
   /** A slow high orbit of the planet, framing it whole behind the menu. */
   private updateMenuCamera(dt: number): void {
     this.menuOrbit += dt * 0.06;
-
-    // Fog is scaled to the *ground* horizon — about 14 m. The menu camera sits
-    // 78 m off the surface, which puts the entire planet past `fog.far`, and it
-    // rendered as a flat grey disc with no terrain on it at all. An orbital
-    // shot has no atmosphere between it and the world, so it gets none.
-    const scene = this.world.scene;
-    if (scene.fog) {
-      this.gameFog = scene.fog as THREE.Fog;
-      scene.fog = null;
-    }
+    // The orbital shot has no air between it and the world — Environment
+    // drops the fog in menu mode — and its sun keys the face we look at.
 
     const camera = this.renderer.camera;
     // Far enough that the whole planet sits in frame with sky around it — the
@@ -1193,26 +1166,6 @@ export class PlanetScene implements IScene {
     // unlike gameplay, where up is local to the player's position.
     camera.up.set(0, 1, 0);
     camera.lookAt(0, 0, 0);
-
-    // Light the hemisphere we are actually looking at.
-    //
-    // The sun follows the *player*, who in menu mode is standing somewhere on
-    // the far side — so the face of the planet on screen had no key light at
-    // all and read as a flat disc. A three-quarter key from up and to the left
-    // of the camera gives the sphere a terminator, which is the only thing that
-    // makes a ball look like a world.
-    _sunUp.copy(camera.position).normalize();
-    _sunTangent.set(0, 1, 0).cross(_sunUp).normalize();
-    _sunDir
-      .copy(_sunUp)
-      .multiplyScalar(0.55)
-      .addScaledVector(_sunTangent, 0.7)
-      .addScaledVector(camera.up, 0.45)
-      .normalize();
-
-    this.sun.position.copy(_sunDir).multiplyScalar(PLANET_RADIUS * 3);
-    this.sun.target.position.set(0, 0, 0);
-    this.sun.target.updateMatrixWorld();
   }
 
   /**
@@ -1445,44 +1398,6 @@ export class PlanetScene implements IScene {
    * that makes a place feel like somewhere rather than like a setting.
    */
   /**
-   * Mist gathers in the low ground.
-   *
-   * Driven by the player's altitude rather than by per-pixel height, and that
-   * is a deliberate trade worth stating. Real height fog needs the fog factor
-   * computed from each fragment's world Y, which on a sphere means every
-   * material in the scene getting a shader injection — and this world has toon
-   * materials, instanced props, imported models and a custom sky, so that is a
-   * modification in six places that all have to agree.
-   *
-   * What the player actually *feels* is "walking down into a valley fills the
-   * air". Scaling the existing linear fog by the camera's own altitude gives
-   * exactly that for two lines, works with every material automatically, and
-   * costs nothing. What it cannot do is show a bank of mist lying in a hollow
-   * seen from above — that is the real limitation, and it is worth the trade
-   * until something needs the view from the hill.
-   *
-   * Smoothed hard, because fog range is a whole-screen property: let it track
-   * altitude directly and a walk over uneven ground makes the entire image
-   * pulse.
-   */
-  private updateValleyFog(dt: number): void {
-    const fog = this.world.scene.fog as THREE.Fog | null;
-    if (!fog) return;
-
-    const altitude = this.controller.smoothedPosition.length() - SEA_LEVEL_RADIUS;
-    // Thickest at the waterline, gone by four metres up.
-    const openness = THREE.MathUtils.smoothstep(altitude, 0.2, 4.2);
-    // A gentle haze in the hollows, never a whiteout: in daylight the valley
-    // mist is a hint, not a wall.
-    const wanted = 0.75 + openness * 0.45;
-
-    this.fogOpenness += (wanted - this.fogOpenness) * (1 - Math.exp(-1.6 * dt));
-
-    fog.near = this.fogBaseNear * this.fogOpenness;
-    fog.far = this.fogBaseFar * this.fogOpenness;
-  }
-
-  /**
    * Swap the procedural residents for authored ones.
    *
    * The mix asked for: the *look* of an imported model with the *life* of the
@@ -1632,8 +1547,21 @@ export class PlanetScene implements IScene {
       yaws: [shrine.hall.yaw],
       scaleJitter: 0,
     });
-    await this.addImportedProp('momiji', shrine.momiji, 4.8, 10007);
-    await this.addImportedProp('sakura', shrine.sakura, 5.8, 10009);
+    this.addTrees('momiji', shrine.momiji, 4.8, 10007);
+    this.addTrees('sakura', shrine.sakura, 5.8, 10009);
+  }
+
+  /**
+   * Plant painted trees. Trunks block the camera; crowns do not, because a
+   * camera that bumps off leaves is a camera that twitches all through a wood.
+   */
+  private addTrees(species: TreeSpecies, positions: THREE.Vector3[], height: number, seed: number): void {
+    for (const mesh of plantTrees(species, positions, height, seed, this.renderer.tier)) {
+      this.world.scene.add(mesh);
+      if (!mesh.userData.trunk) continue;
+      this.cameraOccluders.push(mesh);
+      if (this.occludersRegistered) this.rig?.addOccluders([mesh]);
+    }
   }
 
   /**
@@ -1646,14 +1574,12 @@ export class PlanetScene implements IScene {
    */
   private buildWilderness(): void {
     const { trees, rocks, cover } = this.layout.wilderness;
-    const species: Array<[string, number]> = [
-      ['sakura', 5.2],
-      ['momiji', 4.6],
-      ['bamboo', 4.4],
-    ];
-    species.forEach(([name, height], i) => {
-      void this.addImportedProp(name, trees[i]!, height, 12001 + i, { scaleJitter: 0.18 });
-    });
+    // Cherry and cedar between the districts, with the red maples kept for
+    // the wood and the shrine, where they mean something. Cedars are the
+    // dark verticals that give a Japanese hillside its depth.
+    this.addTrees('sakura', trees[0]!, 5.2, 12001);
+    this.addTrees('pine', trees[1]!, 6.4, 12002);
+    void this.addImportedProp('bamboo', trees[2]!, 4.4, 12003, { scaleJitter: 0.18 });
     const rockMesh = buildRocks(rocks, 12111);
     this.world.scene.add(rockMesh);
     this.cameraOccluders.push(rockMesh);
@@ -1710,19 +1636,9 @@ export class PlanetScene implements IScene {
     this.callbacks.onDistrictChanged?.(runtime.def.id, runtime.def.displayName);
   }
 
-  private updateSun(): void {
+  private updateCharacterLights(): void {
     const position = this.player.object3D.position;
     _sunUp.copy(position).normalize();
-
-    _sunTangent.set(0, 1, 0).projectOnPlane(_sunUp);
-    if (_sunTangent.lengthSq() < 1e-6) _sunTangent.set(1, 0, 0).projectOnPlane(_sunUp);
-    _sunTangent.normalize();
-
-    _sunDir.copy(_sunUp).multiplyScalar(0.75).addScaledVector(_sunTangent, 0.66).normalize();
-
-    this.sun.position.copy(position).addScaledVector(_sunDir, 70);
-    this.sun.target.position.copy(position);
-    this.sun.target.updateMatrixWorld();
 
     // Character lights ride with the camera, so she is lit from the side the
     // player is looking from however the camera is orbited. Both sit close to

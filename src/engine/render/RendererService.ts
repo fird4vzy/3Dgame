@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import type { EventBus } from '@core/events/EventBus';
-import type { Viewport } from '@engine/platform/Viewport';
+import type { QualityTier, Viewport } from '@engine/platform/Viewport';
 import { clamp } from '@core/math/spherical';
 import { PostFX } from './PostFX';
+import { installAtmosphere } from './Atmosphere';
 
 const BASE_VFOV_DEG = 55;
 const BASE_ASPECT = 16 / 9;
@@ -36,6 +37,9 @@ export class RendererService {
     private readonly viewport: Viewport,
     private readonly bus: EventBus,
   ) {
+    // Before anything compiles: every material's fog becomes the atmosphere.
+    installAtmosphere();
+
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: viewport.tier !== 'low',
@@ -66,6 +70,11 @@ export class RendererService {
   setBaseFov(deg: number): void {
     this.baseFov = deg;
     this.applyFov();
+  }
+
+  /** The device's quality tier, for anything that scales its own cost. */
+  get tier(): QualityTier {
+    return this.viewport.tier;
   }
 
   get isContextLost(): boolean {

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PLAYER_HEIGHT } from '@config/constants';
-import { createToonMaterial } from '@engine/render/ToonMaterial';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { createWorldMaterial } from '@engine/render/WorldMaterial';
 
 /**
  * Procedural stand-in props.
@@ -11,24 +12,58 @@ import { createToonMaterial } from '@engine/render/ToonMaterial';
  * single mesh so they instance cleanly when that happens.
  */
 
-/** A street lamp. Its emissive is driven by the district's light level. */
+/**
+ * A street lantern: a paper andon on a wooden post. Its paper's emissive is
+ * driven by the district's light level.
+ *
+ * It was a glowing ball on a pole — a placeholder that read as a park lamp in
+ * a Japanese village, and under real light as exactly what it was. The paper
+ * box is the "bulb" the illumination system talks to; by day it is simply
+ * paper, which is what makes it worth lighting.
+ */
 export function createLamp(): { group: THREE.Group; light: THREE.PointLight; bulb: THREE.Mesh } {
   const group = new THREE.Group();
   group.name = 'lamp';
 
-  const postMaterial = createToonMaterial({ color: '#2f3242' });
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 2.6, 6), postMaterial);
-  post.position.y = 1.3;
-  post.castShadow = true;
-  group.add(post);
+  // Post, lantern frame, cap and roof in one dark-wood mesh: one draw.
+  const parts: THREE.BufferGeometry[] = [];
+  const post = new THREE.BoxGeometry(0.11, 2.3, 0.11);
+  post.translate(0, 1.15, 0);
+  parts.push(post);
+  const base = new THREE.BoxGeometry(0.36, 0.04, 0.36);
+  base.translate(0, 2.31, 0);
+  parts.push(base);
+  for (const [x, z] of [
+    [-0.15, -0.15],
+    [0.15, -0.15],
+    [-0.15, 0.15],
+    [0.15, 0.15],
+  ] as const) {
+    const corner = new THREE.BoxGeometry(0.035, 0.42, 0.035);
+    corner.translate(x, 2.53, z);
+    parts.push(corner);
+  }
+  const roof = new THREE.ConeGeometry(0.31, 0.2, 4, 1);
+  roof.rotateY(Math.PI / 4);
+  roof.translate(0, 2.84, 0);
+  parts.push(roof);
+  const frame = new THREE.Mesh(
+    mergeGeometries(parts.map((g) => g.toNonIndexed()))!,
+    createWorldMaterial({ color: '#4a3526', roughness: 0.9 }),
+  );
+  for (const part of parts) part.dispose();
+  frame.castShadow = true;
+  frame.receiveShadow = true;
+  group.add(frame);
 
-  const bulbMaterial = createToonMaterial({
-    color: '#3a3d52',
+  const bulbMaterial = createWorldMaterial({
+    color: '#e6dcc4',
     emissive: '#e8a33a',
     emissiveIntensity: 0,
+    roughness: 0.92,
   });
-  const bulb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.22, 1), bulbMaterial);
-  bulb.position.y = 2.7;
+  const bulb = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.38, 0.27), bulbMaterial);
+  bulb.position.y = 2.53;
   group.add(bulb);
 
   // Range 0 keeps the light effectively off until ignition ramps it up.
@@ -42,7 +77,7 @@ export function createLamp(): { group: THREE.Group; light: THREE.PointLight; bul
   // Softening it trades physical accuracy for a lamp that works at every
   // distance, which is the correct trade for a cel-shaded game.
   const light = new THREE.PointLight(0xe8a33a, 0, 18, 1.4);
-  light.position.y = 2.7;
+  light.position.y = 2.53;
   group.add(light);
 
   return { group, light, bulb };
@@ -59,13 +94,13 @@ export function createParcel(colour: string): { group: THREE.Group; glow: THREE.
     // range: carried at chest height it flared into a white disc that erased
     // the courier behind it. The parcel should read as a lantern she is
     // holding, not as a light source pointed at the camera.
-    createToonMaterial({ color: colour, emissive: colour, emissiveIntensity: 0.75 }),
+    createWorldMaterial({ color: colour, emissive: colour, emissiveIntensity: 0.75 }),
   );
   group.add(core);
 
   const cage = new THREE.Mesh(
     new THREE.TorusGeometry(0.23, 0.02, 6, 14),
-    createToonMaterial({ color: '#6b5a3a' }),
+    createWorldMaterial({ color: '#6b5a3a' }),
   );
   cage.rotation.x = Math.PI / 2;
   group.add(cage);
@@ -82,7 +117,7 @@ export function createParcel(colour: string): { group: THREE.Group; glow: THREE.
 export function createShard(): THREE.Mesh {
   return new THREE.Mesh(
     new THREE.OctahedronGeometry(0.19, 0),
-    createToonMaterial({ color: '#f6bd60', emissive: '#e8a33a', emissiveIntensity: 1.4 }),
+    createWorldMaterial({ color: '#f6bd60', emissive: '#e8a33a', emissiveIntensity: 1.4 }),
   );
 }
 
@@ -96,7 +131,7 @@ export function createVillager(colour: string): THREE.Group {
   const group = new THREE.Group();
   group.name = 'villager';
 
-  const bodyMaterial = createToonMaterial({ color: colour });
+  const bodyMaterial = createWorldMaterial({ color: colour });
 
   const body = new THREE.Mesh(
     new THREE.CapsuleGeometry(0.32, PLAYER_HEIGHT - 0.9, 5, 10),
@@ -114,7 +149,7 @@ export function createVillager(colour: string): THREE.Group {
   // Facing cue, matching the placeholder player.
   const nose = new THREE.Mesh(
     new THREE.ConeGeometry(0.06, 0.15, 6),
-    createToonMaterial({ color: '#c8582f' }),
+    createWorldMaterial({ color: '#c8582f' }),
   );
   nose.rotation.x = Math.PI / 2;
   nose.position.set(0, PLAYER_HEIGHT - 0.05, 0.24);

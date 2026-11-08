@@ -111,7 +111,7 @@ export class CourierAnimator implements LoadedCharacter {
     this.object3D = this.rig.root;
 
     for (const m of this.rig.meshes) {
-      const material = m.material as THREE.MeshToonMaterial;
+      const material = m.material as THREE.MeshStandardMaterial;
       this.baseColours.set(m, material.color.clone());
     }
 
@@ -273,7 +273,7 @@ export class CourierAnimator implements LoadedCharacter {
    */
   setTint(colour: THREE.Color): void {
     for (const [m, base] of this.baseColours) {
-      const material = m.material as THREE.MeshToonMaterial;
+      const material = m.material as THREE.MeshStandardMaterial;
       _tint.copy(colour).lerp(WHITE, 0.55);
       material.color.copy(base).lerp(_tint, 0.16);
     }

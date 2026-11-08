@@ -83,6 +83,11 @@ export class Viewport {
   static detectTier(): QualityTier {
     if (typeof navigator === 'undefined') return 'medium';
 
+    // A software rasteriser is the floor whatever the CPU count says: a
+    // sixteen-core machine running SwiftShader draws a grass field at a
+    // frame every few seconds. CI and GPU-less VMs land here too.
+    if (isSoftwareRenderer(Viewport.rendererName())) return 'low';
+
     const cores = navigator.hardwareConcurrency ?? 4;
     const memory = (navigator as { deviceMemory?: number }).deviceMemory ?? 4;
     const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
@@ -92,4 +97,23 @@ export class Viewport {
     if (cores >= 8 && memory >= 8 && !coarse) return 'high';
     return 'medium';
   }
+
+  /** The GPU's own name for itself, or '' where the browser will not say. */
+  private static rendererName(): string {
+    try {
+      const gl = document.createElement('canvas').getContext('webgl2');
+      if (!gl) return '';
+      const info = gl.getExtension('WEBGL_debug_renderer_info');
+      const name = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : '';
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      return name;
+    } catch {
+      return '';
+    }
+  }
+}
+
+/** Whether a WebGL renderer string names a CPU rasteriser rather than a GPU. */
+export function isSoftwareRenderer(name: string): boolean {
+  return /swiftshader|llvmpipe|softpipe|software|basic render driver/i.test(name);
 }
