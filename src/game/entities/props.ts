@@ -83,32 +83,43 @@ export function createLamp(): { group: THREE.Group; light: THREE.PointLight; bul
   return { group, light, bulb };
 }
 
-/** A carried lumen. Bobs and glows; its colour encodes warmth. */
-export function createParcel(colour: string): { group: THREE.Group; glow: THREE.PointLight; core: THREE.Mesh } {
+/**
+ * A carried lumen: a bottle of light on a short brass bail.
+ *
+ * It was an orb the size of a grapefruit inside a ring nearly half a metre
+ * across, centred on her wrist, with a point light in the same spot. The
+ * ring read as a frying pan, and a light a few centimetres from her forearm
+ * blew the arm out to white — the glowing streak up her arm in every carry.
+ *
+ * Now the group's origin is the top of the bail, where a hand holds it, and
+ * the orb hangs below. The light is a spot pointed at the ground: a warm
+ * pool round her feet, which is what a lantern is for, and nothing aimed
+ * back up the arm that carries it. Its colour encodes warmth.
+ */
+export function createParcel(colour: string): { group: THREE.Group; glow: THREE.SpotLight; core: THREE.Mesh } {
   const group = new THREE.Group();
   group.name = 'parcel';
 
   const core = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(0.13, 1),
-    // Emissive was 1.8, which is well past the bloom threshold at point-blank
-    // range: carried at chest height it flared into a white disc that erased
-    // the courier behind it. The parcel should read as a lantern she is
-    // holding, not as a light source pointed at the camera.
-    createWorldMaterial({ color: colour, emissive: colour, emissiveIntensity: 0.75 }),
+    new THREE.IcosahedronGeometry(0.068, 3),
+    createWorldMaterial({ color: colour, emissive: colour, emissiveIntensity: 1.5, roughness: 0.25 }),
   );
+  core.position.y = -0.16;
   group.add(core);
 
-  const cage = new THREE.Mesh(
-    new THREE.TorusGeometry(0.23, 0.02, 6, 14),
-    createWorldMaterial({ color: '#6b5a3a' }),
-  );
-  cage.rotation.x = Math.PI / 2;
-  group.add(cage);
+  const brass = createWorldMaterial({ color: '#8c6b3c', roughness: 0.45, metalness: 0.6 });
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.032, 0.03, 12), brass);
+  cap.position.y = -0.085;
+  group.add(cap);
+  // Half a loop, from the cap up to where the fingers close on it.
+  const bail = new THREE.Mesh(new THREE.TorusGeometry(0.032, 0.0045, 6, 18, Math.PI), brass);
+  bail.position.y = -0.07;
+  group.add(bail);
 
-  // Short range and low intensity: it is lighting her hand and the ground by
-  // her feet, not the whole district.
-  const glow = new THREE.PointLight(new THREE.Color(colour), 1.6, 4.5, 2);
-  group.add(glow);
+  const glow = new THREE.SpotLight(new THREE.Color(colour), 3, 7, Math.PI * 0.36, 0.85, 2);
+  glow.position.copy(core.position);
+  glow.target.position.set(0, -2, 0.25);
+  group.add(glow, glow.target);
 
   return { group, glow, core };
 }

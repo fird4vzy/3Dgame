@@ -129,12 +129,31 @@ async function travelTo(setTarget, stopAt = 2.0, timeoutMs = 90000) {
   const started = Date.now();
 
   let running = true;
+  // Progress watch: buildings stop the player now, and steering straight at
+  // the target walks into the first wall in the way. When the distance has
+  // not shrunk for a while, step sideways along the obstacle — the way a
+  // player does — alternating sides if the first one does not clear it.
+  let best = Infinity;
+  let lastProgress = Date.now();
+  let side = 'KeyD';
   await page.keyboard.down('KeyW');
   await page.keyboard.down('ShiftLeft');
   try {
     while (Date.now() - started < timeoutMs) {
       const info = await faceTarget();
       if (!info) break;
+
+      if (info.distance < best - 0.3) {
+        best = info.distance;
+        lastProgress = Date.now();
+      } else if (Date.now() - lastProgress > 1400) {
+        await page.keyboard.down(side);
+        await page.waitForTimeout(900);
+        await page.keyboard.up(side);
+        side = side === 'KeyD' ? 'KeyA' : 'KeyD';
+        lastProgress = Date.now();
+        continue;
+      }
 
       // Drop to a walk for the last few metres. At 4.6 m/s the character
       // carries ~0.75 m of momentum after the key is released, which is enough

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { World } from '@engine/entity/World';
 import { Entity } from '@engine/entity/Entity';
 import { BvhWorld } from '@engine/physics/BvhWorld';
+import { colliderTriangles } from '@engine/physics/colliders';
 import type { InputManager } from '@engine/input/InputManager';
 import type { EventBus } from '@core/events/EventBus';
 import type { RendererService } from '@engine/render/RendererService';
@@ -72,6 +73,8 @@ const _tint = new THREE.Color();
 const DUSK_TINT = new THREE.Color('#7f8aa8');
 const LIT_TINT = new THREE.Color('#ffffff');
 const _emitUp = new THREE.Vector3();
+const _parcelTarget = new THREE.Vector3();
+const _parcelPull = new THREE.Vector3();
 const STEAM = new THREE.Color('#7f939b');
 const _emitPos = new THREE.Vector3();
 const DUST_COLOUR = new THREE.Color('#b9ae94');
@@ -155,6 +158,14 @@ export class PlanetScene implements IScene {
   private waterReflection: WaterReflection | null = null;
   /** Set once onEnter has handed the rig its occluders; later trunks register themselves. */
   private occludersRegistered = false;
+  /**
+   * Collision for everything solid that is not terrain: walls, trunks, gate
+   * pillars, lantern posts. Props load asynchronously, so their colliders
+   * arrive in batches and the obstacle BVH is rebuilt when a batch lands.
+   */
+  private readonly obstacleBatches: Float32Array[] = [];
+  private obstaclesDirty = false;
+  private obstacleClock = 0;
   /** Short-range lights that follow the player, so she reads in the dark. */
   private characterFill!: THREE.PointLight;
   private characterRim!: THREE.PointLight;
@@ -177,8 +188,11 @@ export class PlanetScene implements IScene {
   private petals!: Petals;
   private readonly firefliesColour = new THREE.Color();
 
-  private parcelVisual: { group: THREE.Group; glow: THREE.PointLight; core: THREE.Mesh } | null =
+  private parcelVisual: { group: THREE.Group; glow: THREE.SpotLight; core: THREE.Mesh } | null =
     null;
+  /** The bone the lantern hangs from, if the character has hands. */
+  private parcelHand: THREE.Object3D | null = null;
+  private readonly parcelVelocity = new THREE.Vector3();
   private carriedWeight: ParcelWeight = 'light';
   /** Whatever the parcel was parented to — a hand socket, or the body. */
   private parcelParent: THREE.Object3D | null = null;
@@ -243,6 +257,7 @@ export class PlanetScene implements IScene {
 
     this.rig.addOccluders(this.cameraOccluders);
     this.occludersRegistered = true;
+    this.flushObstacles();
 
     this.quests.reevaluate();
     this.bus.emit('scene:entered', { id: this.id });
@@ -399,6 +414,8 @@ export class PlanetScene implements IScene {
     this.updateVillagers(dt);
     this.terrain.update(dt);
     updateTrees(dt);
+    this.obstacleClock += dt;
+    if (this.obstaclesDirty && this.obstacleClock > 0.5) this.flushObstacles();
     this.grass?.update(dt, this.controller.smoothedPosition, this.renderer.camera);
     this.cats?.update(dt, this.player.object3D.position);
     this.updateFireflies(dt);
@@ -663,6 +680,7 @@ export class PlanetScene implements IScene {
         group.quaternion.copy(surfaceQuaternion(position));
         this.world.scene.add(group);
         this.cullables.push(group);
+        this.addObstacle(group);
 
         lights.push(light);
         bulbs.push(bulb);
@@ -719,6 +737,7 @@ export class PlanetScene implements IScene {
       } else {
         for (const mesh of buildDistrictProps(def.id, propSpots, def.id.length * 331)) {
           this.world.scene.add(mesh);
+          if (def.id !== 'tidebreak') this.addObstacle(mesh);
           // Scenery has to block the camera, or it parks inside a rock.
           this.cameraOccluders.push(mesh);
         }
@@ -749,6 +768,7 @@ export class PlanetScene implements IScene {
 
       for (const mesh of buildVillageSet(forStall, def.id.length * 449)) {
         this.world.scene.add(mesh);
+        this.addObstacle(mesh);
         this.cameraOccluders.push(mesh);
       }
 
@@ -1017,20 +1037,16 @@ export class PlanetScene implements IScene {
 
     const parcel = createParcel(colour);
 
-    // Parent to the character's hand if it has one, so the lumen travels with
-    // the arm as it swings instead of floating alongside the body. Characters
-    // without a skeleton (a sprite) return null, and it falls back to a fixed
-    // offset — which is exactly what the socket contract is for.
-    const hand = this.character?.getSocket('hand_R') ?? null;
-    if (hand) {
-      parcel.group.position.set(0, 0, 0);
-      hand.add(parcel.group);
-      this.parcelParent = hand;
-    } else {
-      parcel.group.position.set(0.34, 1.0, 0.16);
-      this.player.object3D.add(parcel.group);
-      this.parcelParent = this.player.object3D;
-    }
+    // The lantern lives in the body's space and *follows* the hand on a
+    // spring, rather than being parented to the bone. Parented, it inherited
+    // every twist of the wrist and swung its light about; following, it hangs
+    // plumb below her fingers and lags a little, the way a held lantern does.
+    // Characters without a skeleton return no socket and it rides at the hip.
+    this.parcelHand = this.character?.getSocket('hand_R') ?? null;
+    parcel.group.position.set(0.3, 0.95, 0.14);
+    this.parcelVelocity.set(0, 0, 0);
+    this.player.object3D.add(parcel.group);
+    this.parcelParent = this.player.object3D;
 
     this.parcelVisual = parcel;
   }
@@ -1046,6 +1062,7 @@ export class PlanetScene implements IScene {
       material?.dispose?.();
     });
     this.parcelVisual = null;
+    this.parcelHand = null;
     this.carriedWeight = 'light';
   }
 
@@ -1057,20 +1074,32 @@ export class PlanetScene implements IScene {
     const active = this.quests.active;
     const warmth = active ? this.warmth.warmthOf(active.def.id) : 1;
 
-    // When held in a socket the arm supplies the motion, so the parcel only
-    // needs its own slow spin and a hint of float.
-    const inHand = this.parcelParent !== null && this.parcelParent !== this.player.object3D;
-    this.parcelVisual.group.position.y = inHand
-      ? Math.sin(this.bobTimer * 1.6 * Math.PI * 2) * 0.012
-      : 1.0 + Math.sin(this.bobTimer * 1.6 * Math.PI * 2) * 0.02;
-    this.parcelVisual.group.rotation.y += dt * 0.8;
+    // Where the hand is, in the body's frame; or the hip, without one.
+    const group = this.parcelVisual.group;
+    if (this.parcelHand) {
+      this.parcelHand.getWorldPosition(_parcelTarget);
+      this.player.object3D.worldToLocal(_parcelTarget);
+    } else {
+      _parcelTarget.set(0.3, 0.95 + Math.sin(this.bobTimer * 1.6 * Math.PI * 2) * 0.02, 0.14);
+    }
+    // A slightly under-damped spring: it settles in a few swings.
+    const step = Math.min(dt, 1 / 30);
+    _parcelPull.subVectors(_parcelTarget, group.position).multiplyScalar(140 * step);
+    this.parcelVelocity.add(_parcelPull).multiplyScalar(Math.max(0, 1 - 13 * step));
+    group.position.addScaledVector(this.parcelVelocity, step);
+    // A long way off (a teleport, a respawn) it simply jumps.
+    if (group.position.distanceToSquared(_parcelTarget) > 1) {
+      group.position.copy(_parcelTarget);
+      this.parcelVelocity.set(0, 0, 0);
+    }
+    this.parcelVisual.core.rotation.y += dt * 0.8;
 
     const colour = new THREE.Color('#69a5d8').lerp(new THREE.Color('#f6bd60'), warmth);
     const material = this.parcelVisual.core.material as THREE.MeshStandardMaterial;
     material.emissive.copy(colour);
     material.color.copy(colour);
     this.parcelVisual.glow.color.copy(colour);
-    this.parcelVisual.glow.intensity = 1.1 + warmth * 1.1;
+    this.parcelVisual.glow.intensity = 2 + warmth * 3;
   }
 
   /** The hand-off burst: lumen motes rising off the parcel as it changes hands. */
@@ -1233,6 +1262,26 @@ export class PlanetScene implements IScene {
     this.bus.emit('cat:petted', { index, friend: this.cats.isFriend(index) });
   }
 
+  /** Queue an object's body-height footprint as collision. */
+  private addObstacle(object: THREE.Object3D): void {
+    this.obstacleBatches.push(colliderTriangles(object));
+    this.obstaclesDirty = true;
+  }
+
+  /** Rebuild the obstacle BVH from every batch so far. */
+  private flushObstacles(): void {
+    this.obstaclesDirty = false;
+    this.obstacleClock = 0;
+    const total = this.obstacleBatches.reduce((n, batch) => n + batch.length, 0);
+    const all = new Float32Array(total);
+    let offset = 0;
+    for (const batch of this.obstacleBatches) {
+      all.set(batch, offset);
+      offset += batch.length;
+    }
+    this.collision.setObstacles(all);
+  }
+
   /**
    * Scatter an imported model as one instanced draw.
    *
@@ -1257,6 +1306,7 @@ export class PlanetScene implements IScene {
     if (!mesh) return;
 
     this.world.scene.add(mesh);
+    this.addObstacle(mesh);
     // Instances span the planet, so the whole mesh must not be horizon-culled
     // by its origin — that would blink every copy out at once. It still blocks
     // the camera, which is what stops the rig parking inside a torii.
@@ -1508,6 +1558,7 @@ export class PlanetScene implements IScene {
     } catch {
       // Keep the procedural tower. A landmark that fails to load is a landmark
       // that stays as it was, never a hole in the skyline.
+      this.addObstacle(group);
       return;
     }
 
@@ -1519,6 +1570,7 @@ export class PlanetScene implements IScene {
     }
 
     group.add(model);
+    this.addObstacle(group);
 
     // Lamp to the gallery. Slightly below the very top, where the lantern room
     // actually is rather than where the finial is.
@@ -1559,6 +1611,7 @@ export class PlanetScene implements IScene {
     for (const mesh of plantTrees(species, positions, height, seed, this.renderer.tier)) {
       this.world.scene.add(mesh);
       if (!mesh.userData.trunk) continue;
+      this.addObstacle(mesh);
       this.cameraOccluders.push(mesh);
       if (this.occludersRegistered) this.rig?.addOccluders([mesh]);
     }
@@ -1582,6 +1635,7 @@ export class PlanetScene implements IScene {
     void this.addImportedProp('bamboo', trees[2]!, 4.4, 12003, { scaleJitter: 0.18 });
     const rockMesh = buildRocks(rocks, 12111);
     this.world.scene.add(rockMesh);
+    this.addObstacle(rockMesh);
     this.cameraOccluders.push(rockMesh);
     for (const mesh of buildGroundCover('landing', cover, 12211)) {
       this.world.scene.add(mesh);

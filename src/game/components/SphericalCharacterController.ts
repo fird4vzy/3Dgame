@@ -163,6 +163,21 @@ export class SphericalCharacterController extends Component {
     this.resolveCollision(dt);
     this.snapToGround();
 
+    // Standing still on walkable ground means standing still.
+    //
+    // Every step gravity presses the capsule a few millimetres into the
+    // slope, and the depenetration pushes it back out along the slope's
+    // normal — which leans downhill. A millimetre a step is five centimetres
+    // a second: she crept down every hill while "idle", and the debug panel
+    // never read 0.00 m/s. So once friction has stopped her, the point on the
+    // surface is pinned and only her height may change.
+    if (wasGrounded && this.grounded && inputMagnitude <= 1e-4 && _horizontal.lengthSq() < 1e-8) {
+      const radius = transform.position.length();
+      transform.position.copy(_prevPosition).setLength(radius);
+      _tmp.copy(this.velocity).projectOnPlane(_up);
+      this.velocity.sub(_tmp);
+    }
+
     if (!wasGrounded && this.grounded) this.onLand();
 
     // 8. Orientation and animation state.
@@ -197,7 +212,18 @@ export class SphericalCharacterController extends Component {
     // The capsule was pushed out; move the entity by the same displacement.
     transform.position.add(hit.displacement);
 
-    if (!hit.normal) return;
+    // A wall stops what is moving into it and lets the rest slide along it.
+    if (hit.wallNormal) {
+      const into = this.velocity.dot(hit.wallNormal);
+      if (into < 0) this.velocity.addScaledVector(hit.wallNormal, -into);
+    }
+
+    if (!hit.normal) {
+      // Touching only a wall says nothing about the ground; ground snapping
+      // decides that, as it does when touching nothing at all.
+      this.grounded = false;
+      return;
+    }
 
     _up.copy(transform.position).normalize();
     const slopeCos = Math.cos((tuning.move.maxSlopeDeg * Math.PI) / 180);

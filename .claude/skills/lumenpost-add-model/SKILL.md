@@ -32,7 +32,11 @@ Budgets: prop < ~5k tris, 1 material, 512–1024 texture. Hero building ≤ 12k 
 node tools/shoot-model.mjs <name> <heightM> <scratch>/<name>.png
 ```
 
-Read the PNG. Reject: wrong architecture, geometry growing out of legs/walls, stray vertices far below the base (they break `groundLevel` anchoring), over budget.
+Read the PNG. Reject: wrong architecture, geometry growing out of legs/walls, over budget.
+
+Generated buildings often carry passengers — a tree fused to the side, a lump under the floor. A lump under the floor lifts the whole model off the ground (`groundLevel` anchors on it). Run `node tools/strip-debris.mjs public/assets/models/<name>.glb --dry`, read which pieces it would remove, then run it without `--dry` and shoot the model again. Per-file only: on other models the small pieces are lanterns and flower pots.
+
+Placed props get collision automatically (`addObstacle` in PlanetScene, footprint at body height from `engine/physics/colliders.ts`); a prop added some other way needs `this.addObstacle(mesh)` or the player walks through it.
 
 ## 4. Place
 

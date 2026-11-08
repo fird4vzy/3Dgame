@@ -4,8 +4,10 @@ import { MeshBVH } from 'three-mesh-bvh';
 export interface CapsuleHit {
   /** Total depenetration applied this call. */
   displacement: THREE.Vector3;
-  /** Averaged contact normal, or null if nothing was touched. */
+  /** Averaged terrain contact normal, or null if no terrain was touched. */
   normal: THREE.Vector3 | null;
+  /** Averaged push from obstacles (walls, trunks), always along the ground. */
+  wallNormal: THREE.Vector3 | null;
   contacts: number;
 }
 
@@ -23,6 +25,9 @@ const _triPoint = new THREE.Vector3();
 const _capsulePoint = new THREE.Vector3();
 const _delta = new THREE.Vector3();
 const _normalSum = new THREE.Vector3();
+const _wallSum = new THREE.Vector3();
+const _axis = new THREE.Vector3();
+const _toCapsule = new THREE.Vector3();
 const _originalStart = new THREE.Vector3();
 const _worldStart = new THREE.Vector3();
 const _ray = new THREE.Ray();
@@ -40,6 +45,12 @@ const _localOrigin = new THREE.Vector3();
 export class BvhWorld {
   private bvh: MeshBVH | null = null;
   private mesh: THREE.Mesh | null = null;
+  /**
+   * Walls, trunks, gate pillars: collided with but never stood on and never
+   * ray-cast, so nothing about grounding, gliding or the camera changes —
+   * they only stop the capsule passing through. Same space as the terrain.
+   */
+  private obstacles: MeshBVH | null = null;
 
   /** Build the acceleration structure. ~1.5 ms for our terrain. */
   build(mesh: THREE.Mesh): void {
@@ -47,6 +58,19 @@ export class BvhWorld {
     this.bvh = new MeshBVH(mesh.geometry, { maxLeafTris: 8 });
     mesh.geometry.boundsTree = this.bvh;
     mesh.updateMatrixWorld(true);
+  }
+
+  /** Replace the obstacle set with these triangles (flat xyz triples), or clear it. */
+  setObstacles(triangles: Float32Array | null): void {
+    this.obstacles = null;
+    if (!triangles || triangles.length < 9) return;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(triangles, 3));
+    this.obstacles = new MeshBVH(geometry);
+  }
+
+  get obstacleTriangles(): number {
+    return this.obstacles ? this.obstacles.geometry.getAttribute('position').count / 3 : 0;
   }
 
   get isReady(): boolean {
@@ -70,12 +94,14 @@ export class BvhWorld {
     const result: CapsuleHit = {
       displacement: new THREE.Vector3(),
       normal: null,
+      wallNormal: null,
       contacts: 0,
     };
     if (!this.bvh || !this.mesh) return result;
 
     _invMatrix.copy(this.mesh.matrixWorld).invert();
     _normalSum.set(0, 0, 0);
+    _wallSum.set(0, 0, 0);
     _originalStart.copy(start);
     let contacts = 0;
 
@@ -122,6 +148,37 @@ export class BvhWorld {
         },
       });
 
+      // Obstacles push sideways only — along the ground, never up or down —
+      // and report separately, so leaning on a wall never reads as a slope
+      // too steep to stand on.
+      if (this.obstacles) {
+        _axis.subVectors(_segment.end, _segment.start).normalize();
+        this.obstacles.shapecast({
+          intersectsBounds: (bounds) => bounds.intersectsBox(_box),
+          intersectsTriangle: (tri) => {
+            const distance = tri.closestPointToSegment(_segment, _triPoint, _capsulePoint);
+            if (distance >= radius) return false;
+            // Push along the face, not toward the closest point: colliders
+            // are boxes split into triangles, and the closest point on the
+            // *other* half of a face lies on the shared diagonal, which would
+            // shove the player sideways along every wall.
+            tri.getNormal(_delta);
+            _toCapsule.copy(_capsulePoint).sub(_triPoint);
+            if (_delta.dot(_toCapsule) < 0) _delta.negate();
+            _delta.addScaledVector(_axis, -_delta.dot(_axis));
+            // A floor or a ceiling face pushes nothing sideways.
+            if (_delta.lengthSq() < 0.04) return false;
+            _delta.normalize();
+            const depth = radius - distance;
+            _segment.start.addScaledVector(_delta, depth);
+            _segment.end.addScaledVector(_delta, depth);
+            _wallSum.addScaledVector(_delta, depth);
+            iterationContacts++;
+            return false;
+          },
+        });
+      }
+
       contacts += iterationContacts;
       if (iterationContacts === 0) break;
     }
@@ -135,6 +192,9 @@ export class BvhWorld {
 
       if (_normalSum.lengthSq() > 1e-12) {
         result.normal = _normalSum.clone().transformDirection(this.mesh.matrixWorld).normalize();
+      }
+      if (_wallSum.lengthSq() > 1e-12) {
+        result.wallNormal = _wallSum.clone().transformDirection(this.mesh.matrixWorld).normalize();
       }
     }
     result.contacts = contacts;

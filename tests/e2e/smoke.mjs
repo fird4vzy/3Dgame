@@ -122,6 +122,14 @@ check('lands on the surface, not in the void', spawn.grounded, `state=${spawn.st
 check('spawns at plausible altitude', spawn.radius > 50 && spawn.radius < 70, `r=${spawn.radius.toFixed(2)}`);
 check('is idle at rest', spawn.state === 'idle', spawn.state);
 
+// This suite measures how the controller *feels* — speeds, grounding, the
+// jump — and that needs open ground: from the spawn, a straight twelve-second
+// run goes through the village. Houses, trunks and gates stop the player now,
+// which is right in the game and wrong for a speed measurement, so the props'
+// colliders are lifted for the run. They have their own unit tests
+// (collision.test.ts), and the playthrough walks round them.
+await page.evaluate(() => window.__lumenpost.scene.collision.setObstacles(null));
+
 console.log('\nwalking');
 await page.keyboard.down('KeyW');
 await page.waitForTimeout(1500);
