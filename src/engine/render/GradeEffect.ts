@@ -12,7 +12,7 @@ import { BlendFunction, Effect } from 'postprocessing';
  *   an afternoon rather than a render.
  * - **Gentle S-curve contrast**, applied in a perceptual (square-root) space
  *   so it bites on mid-tones rather than crushing shadows.
- * - **Saturation** a touch either side of neutral.
+ * - **Saturation** back up after AgX, which desaturates on its way through.
  *
  * Runs after tone mapping, on display-range values.
  */
@@ -50,7 +50,11 @@ export class GradeEffect extends Effect {
     super('GradeEffect', fragmentShader, {
       blendFunction: BlendFunction.NORMAL,
       uniforms: new Map<string, THREE.Uniform>([
-        ['lift', new THREE.Uniform(options.lift ?? new THREE.Color(0.018, 0.014, 0.01))],
+        // Linear values: 0.005 is a black of about 14/255 once encoded.
+        // This was 0.018 — 36/255, a fifth of the way to mid-grey — and it
+        // flattened every dark fabric in the game to one warm brown: the
+        // player's navy denim lost its blue and read as a black cut-out.
+        ['lift', new THREE.Uniform(options.lift ?? new THREE.Color(0.0052, 0.0044, 0.0034))],
         ['gain', new THREE.Uniform(options.gain ?? new THREE.Color(1.0, 0.985, 0.95))],
         ['contrast', new THREE.Uniform(options.contrast ?? 1.06)],
         ['saturation', new THREE.Uniform(options.saturation ?? 1.06)],

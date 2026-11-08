@@ -16,7 +16,7 @@ the look, and what each piece is for.
 | Grass | ~200 green cones per district | ~190 000 instanced clumps, wind, parting round the player, backlit tips | `game/world/GrassField` |
 | Trees | Generated hulls (faceted red "rocks on sticks") | Procedural trunks + crowns of leaf cards with spherical normals, painted textures, wind | `game/world/Trees` |
 | Water | Translucent toon sphere | Glassy PBR surface, six travelling wave trains, mirror reflections | `PlanetTerrain` water + `game/world/WaterReflection` |
-| Post | Outline → bloom → AgX → vignette | MSAA → bloom → ACES → grade (lifted warm blacks) → vignette | `engine/render/PostFX`, `GradeEffect` |
+| Post | Outline → bloom → AgX → vignette | MSAA → bloom → AgX → grade (contrast, saturation, a slight warm lift) → vignette | `engine/render/PostFX`, `GradeEffect` |
 | Lamps, rocks | Ball on a pole; dodecahedron | Paper andon on a wooden post; mossy boulder | `entities/props`, `entities/districtProps` |
 
 ## Three moods, one object
@@ -57,6 +57,16 @@ against all three: a tweak that flatters one routinely ruins another.
 - **Software GL is detected and forced to the low tier.** The e2e suite runs
   on SwiftShader, which drew the grass field at a frame every few seconds and
   timed the smoke test out. So does any GPU-less machine a player might have.
+- **The player is the one material the sky does not light.** The VRM is
+  MToon-shaded, and MToon ignores `scene.environment`; with the world's
+  ambient moved into the environment map she lost most of hers. The first
+  cut then made it worse twice: ACES's toe crushes values near black about
+  fivefold, and the grade's lift was 0.018 *linear* — 36/255 encoded — which
+  flattened every dark fabric to one warm brown. Her navy denim read as a
+  black cut-out (skirt 19,19,21 against 21,32,45 in the cel build). Fixed
+  with AgX plus saturation and contrast in the grade, and a lift of 0.005.
+  `node tools/probe-character-light.mjs` measures her in all three moods —
+  run it after any change to tone mapping, grading or ambient light.
 - **Grass placement comes from the terrain mesh**, not `heightAt`: random
   points on the drawn triangles, weighted by a `grass` attribute painted
   alongside the colour — none on sand, rock, tracks or building footprints.

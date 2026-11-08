@@ -69,9 +69,15 @@ export class PostFX {
     // three tone-maps as it writes into the composer's buffer, so bloom would
     // read values already compressed to display range and wash out.
     renderer.toneMapping = THREE.NoToneMapping;
-    const toneMapping = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
+    // AgX, not ACES. ACES's toe crushes everything near black by about five
+    // times, and the player's VRM is in dark navy denim on an MToon material
+    // that cannot see the sky's environment light — under ACES she rendered
+    // as a black cut-out (measured: skirt 19,19,21 against 21,32,45 before).
+    // AgX keeps dark fabric legible; the grade puts back the saturation and
+    // contrast AgX gives away. tools/probe-character-light.mjs measures it.
+    const toneMapping = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
 
-    const grade = new GradeEffect();
+    const grade = new GradeEffect({ contrast: 1.15, saturation: 1.32 });
     const vignette = new VignetteEffect({ offset: 0.28, darkness: 0.42 });
 
     // The RenderPass is retargeted per scene rather than rebuilt, since scenes

@@ -57,7 +57,7 @@ is authored in.
   sun-glow scattering in every material; three lighting moods (overcast →
   afternoon → golden hour) blended by progress; ~190k instanced grass clumps
   with wind; procedural cherry, maple and cedar crowns; mirror-reflecting
-  water; MSAA, bloom, ACES and a film grade
+  water; MSAA, bloom, AgX and a film grade
 - Authored Japanese village (Meshy image-to-3D) and a VRM player character
 - 219 unit tests, two browser suites including a full scripted playthrough
 

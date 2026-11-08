@@ -26,6 +26,7 @@ Write shots to the scratchpad directory, not the repo (only `playthrough.png` is
 |---|---|
 | Any lighting / sky / atmosphere / material change | `node tools/shoot-moods.mjs <outDir> [dormant,awake,golden]` — 6 views × 3 moods, into and away from the sun, prints ms per frame. Judge against **all three moods**: a tweak that flatters one ruins another |
 | Water, reflections | `node tools/shoot-lagoon.mjs <outDir>` — Tidebreak lagoon through the sea torii, 3 moods |
+| Is the player still readable? (after tone mapping / grade / ambient changes) | `node tools/probe-character-light.mjs [port]` — skirt/back colour in 3 moods. The VRM is MToon and ignores the sky light; awake skirt should stay bluish (~18,23,30), never ~19,19,21 (black cut-out) |
 | How does the world look? (districts, menu) | `node tools/shoot-world.mjs <outDir>` — menu shot + fixed viewpoints, comparable between runs |
 | Does a new/changed .glb look right, right scale? | `node tools/shoot-model.mjs <name> <heightM> <out.png>` — 4 views + 1.65 m human post + tri/material/texture report |
 | Do buildings sit on the ground? | `node tools/probe-grounding.mjs` — worst gap / burial per footprint in metres. Last known good: worst wall gap 0.16 m on the Landing |
