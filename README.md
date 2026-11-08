@@ -58,13 +58,17 @@ is authored in.
   afternoon → golden hour) blended by progress; ~190k instanced grass clumps
   with wind; procedural cherry, maple and cedar crowns; mirror-reflecting
   water; MSAA, bloom, AgX and a film grade
-- Authored Japanese village (Meshy image-to-3D) and a VRM player character
-- 219 unit tests, two browser suites including a full scripted playthrough
+- Authored Japanese village (Meshy image-to-3D); collision with every house,
+  trunk, gate post and lantern ([`docs/25`](docs/25-solid-world.md))
+- The heroine, generated from her character sheet, rigged, and moving with
+  captured animation — walk, run, jump, a jump for joy after each delivery
+  ([`docs/26`](docs/26-the-heroine.md)); the older VRM is a fallback
+- 229 unit tests, two browser suites including a full scripted playthrough
 
-Payload today: 0.3 MB gzipped JS, 6.6 MB of models, 2.2 MB of audio — and a
-16.5 MB player VRM, which alone breaks the 6 MB budget in `docs/04`. The new
-look added code, not downloads: grass, trees, leaf textures, sky and water are
-all generated at load.
+Payload today: 0.3 MB gzipped JS, 6.6 MB of models, 2.9 MB for the heroine,
+2.2 MB of audio. Grass, trees, leaf textures, sky and water are all generated
+at load. The 16.5 MB VRM still ships in `public/` but is only fetched if the
+heroine fails to load.
 
 Not yet built: composed music, day/night and weather, photo mode.
 Phase 5 in [`docs/13-roadmap.md`](docs/13-roadmap.md).

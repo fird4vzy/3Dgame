@@ -14,7 +14,8 @@ import {
  * A clip name says *what* the character is doing; this says how hard. Rigs that
  * generate their animation need it to lock cadence to ground speed and to shape
  * a jump around its real arc — without it they can only guess, and a guessed
- * cadence is what makes feet slide. Sampled-clip rigs ignore it.
+ * cadence is what makes feet slide. Sampled-clip rigs use the speed to set
+ * the playback rate of walk and run clips for the same reason.
  */
 export interface LocomotionSample {
   /** Speed across the surface, m/s. */
@@ -109,11 +110,59 @@ class SpriteCharacter implements LoadedCharacter {
   }
 }
 
+/** Canonical clips that loop; everything else plays once and holds its last pose. */
+const LOOPING = new Set<ClipName>(['idle', 'idle_look', 'walk', 'run', 'glide', 'carry_idle', 'carry_walk', 'carry_run', 'sit', 'fall']);
+/** Clips whose own rise must not stack on the controller's real jump. */
+const AIRBORNE = new Set<ClipName>(['jump_start', 'fall', 'land']);
+/** Clips whose playback rate follows ground speed. */
+const WALKING = new Set<ClipName>(['walk', 'run', 'carry_walk', 'carry_run']);
+
+const _scale = new THREE.Vector3();
+
+/**
+ * Make a captured clip play in place, and measure how fast it was walking.
+ *
+ * Library clips are recorded walking across a stage: the hips travel. Played
+ * on a character the controller is already moving, that travel is added on
+ * top — she drifts ahead of her own body and snaps back every loop. So the
+ * hips' horizontal drift is removed (linearly, which keeps the side-to-side
+ * sway), and what was removed tells us the clip's native ground speed, in
+ * the hips' parent space.
+ *
+ * Jumps are the vertical version of the same problem: the controller does
+ * the real jump, so the clip's own rise above standing height is clipped off,
+ * keeping the crouch before and the absorption after.
+ */
+export function prepareClip(clip: THREE.AnimationClip, hipsName: string, airborne: boolean): number {
+  const track = clip.tracks.find((t) => t.name === `${hipsName}.position`);
+  if (!track || track.values.length < 6) return 0;
+  const v = track.values;
+  const times = track.times;
+  const count = times.length;
+  const duration = Math.max(1e-3, times[count - 1]! - times[0]!);
+  const dx = v[(count - 1) * 3]! - v[0]!;
+  const dz = v[(count - 1) * 3 + 2]! - v[2]!;
+  const standY = v[1]!;
+  for (let i = 0; i < count; i++) {
+    const f = (times[i]! - times[0]!) / duration;
+    v[i * 3] = v[i * 3]! - dx * f;
+    v[i * 3 + 2] = v[i * 3 + 2]! - dz * f;
+    if (airborne) v[i * 3 + 1] = Math.min(v[i * 3 + 1]!, standY);
+  }
+  return Math.hypot(dx, dz) / duration;
+}
+
 class MeshCharacter implements LoadedCharacter {
   private readonly mixer: THREE.AnimationMixer;
   private readonly clips = new Map<string, THREE.AnimationClip>();
+  /** Native ground speed of each source clip, in the hips' parent space. */
+  private readonly nativeSpeed = new Map<string, number>();
   private readonly resolver: ClipResolver;
+  private readonly hips: THREE.Object3D | null;
   private current: THREE.AnimationAction | null = null;
+  private currentSource = '';
+  private currentRole: ClipName = 'idle';
+  private speed = 0;
 
   constructor(
     readonly definition: CharacterDefinition,
@@ -121,8 +170,80 @@ class MeshCharacter implements LoadedCharacter {
     clips: THREE.AnimationClip[],
   ) {
     this.mixer = new THREE.AnimationMixer(object3D);
-    for (const clip of clips) this.clips.set(clip.name, clip);
+    // The root of the skeleton: the first bone under the model.
+    this.hips = object3D.getObjectByProperty('isBone', true) ?? null;
+
+    // Which source clips play which canonical role, to know how to prepare them.
+    const roles = new Map<string, ClipName>();
+    for (const [ours, theirs] of Object.entries(definition.clips ?? {})) {
+      if (theirs) roles.set(theirs, ours as ClipName);
+    }
+    for (const clip of clips) {
+      this.clips.set(clip.name, clip);
+      if (this.hips) {
+        const role = roles.get(clip.name);
+        prepareClip(clip, this.hips.name, role !== undefined && AIRBORNE.has(role));
+        // Speed from the planted foot, always: clips delivered in place have
+        // no travel to measure, and a clip that did travel is in place by now.
+        // (The hips' drift is no guide either way — a run's half-centimetre of
+        // wobble per loop once read as its speed and played it flat out.)
+        if (role !== undefined && WALKING.has(role)) {
+          const speed = this.measureStance(clip);
+          if (speed > 0) this.nativeSpeed.set(clip.name, speed);
+        }
+      }
+    }
     this.resolver = new ClipResolver(definition, new Set(this.clips.keys()));
+  }
+
+  /**
+   * Ground speed of an in-place walk or run, from its feet.
+   *
+   * While a foot is planted it slides backward under the hips at exactly the
+   * speed the body would be moving forward — that is what planted means. So
+   * the clip is sampled, each foot's lowest frames are taken as its stance,
+   * and its horizontal speed there is the clip's speed. Measured in the hips'
+   * parent space, like the drift-based figure.
+   */
+  private measureStance(clip: THREE.AnimationClip): number {
+    const parent = this.hips?.parent;
+    const feet = ['LeftFoot', 'RightFoot', 'LeftToeBase', 'RightToeBase', 'leftFoot', 'rightFoot']
+      .map((name) => this.object3D.getObjectByName(name))
+      .filter((o): o is THREE.Object3D => !!o)
+      .slice(0, 2);
+    if (!parent || feet.length < 2) return 0;
+
+    const sampler = new THREE.AnimationMixer(this.object3D);
+    const action = sampler.clipAction(clip);
+    action.play();
+    const steps = 48;
+    const track = feet.map(() => [] as THREE.Vector3[]);
+    for (let i = 0; i <= steps; i++) {
+      sampler.setTime((clip.duration * i) / steps);
+      this.object3D.updateMatrixWorld(true);
+      feet.forEach((foot, f) => {
+        track[f]!.push(parent.worldToLocal(foot.getWorldPosition(new THREE.Vector3())));
+      });
+    }
+    sampler.stopAllAction();
+    sampler.uncacheRoot(this.object3D);
+
+    const dt = clip.duration / steps;
+    let sum = 0;
+    let count = 0;
+    for (const points of track) {
+      const lowest = Math.min(...points.map((p) => p.y));
+      const highest = Math.max(...points.map((p) => p.y));
+      const planted = lowest + (highest - lowest) * 0.15;
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1]!;
+        const b = points[i]!;
+        if (a.y > planted || b.y > planted) continue;
+        sum += Math.hypot(b.x - a.x, b.z - a.z) / dt;
+        count++;
+      }
+    }
+    return count > 0 ? sum / count : 0;
   }
 
   play(clip: ClipName, restart = false): void {
@@ -135,15 +256,33 @@ class MeshCharacter implements LoadedCharacter {
     const next = this.mixer.clipAction(animation);
     if (next === this.current && !restart) return;
 
+    const loops = LOOPING.has(resolved.via);
+    next.setLoop(loops ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+    next.clampWhenFinished = !loops;
+    next.timeScale = 1;
     next.reset().play();
     if (this.current && this.current !== next) {
       // Cross-fade rather than cut; 0.18s reads as smooth without feeling soft.
       this.current.crossFadeTo(next, 0.18, false);
     }
     this.current = next;
+    this.currentSource = resolved.sourceName;
+    this.currentRole = resolved.via;
+  }
+
+  setLocomotion(sample: LocomotionSample): void {
+    this.speed = sample.speed;
   }
 
   update(dt: number): void {
+    // Walk and run clips play at the speed the body is actually moving, so
+    // the feet stay planted: a clip recorded at 1.3 m/s and played under a
+    // body doing 2.2 m/s would otherwise slide every stance.
+    const native = WALKING.has(this.currentRole) ? this.nativeSpeed.get(this.currentSource) : undefined;
+    if (this.current && native && this.hips?.parent) {
+      const worldNative = native * this.hips.parent.getWorldScale(_scale).x;
+      this.current.timeScale = THREE.MathUtils.clamp(this.speed / worldNative, 0.55, 1.9);
+    }
     this.mixer.update(dt);
   }
 
@@ -196,9 +335,19 @@ export async function loadCharacter(
   if (source.yOffset) root.position.y = source.yOffset;
 
   root.traverse((object) => {
-    if ((object as THREE.Mesh).isMesh) {
-      object.castShadow = true;
-      object.receiveShadow = true;
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    // A skinned mesh's bounds are its bind pose, not where the animation put
+    // it: a crouch or a reaching arm gets culled at the edge of the frame.
+    if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) mesh.frustumCulled = false;
+    // Same response as the rest of the world: matte, not metal.
+    for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      const standard = material as THREE.MeshStandardMaterial;
+      if (!standard.isMeshStandardMaterial) continue;
+      standard.metalness = Math.min(standard.metalness, 0.1);
+      standard.roughness = Math.max(standard.roughness, 0.6);
     }
   });
 

@@ -1,0 +1,47 @@
+{
+  "id": "heroine",
+  "displayName": "The Courier",
+  "height": 1.6,
+  "source": {
+    "kind": "gltf",
+    "url": "assets/characters/heroine.glb"
+  },
+  "clips": {
+    "idle": "Idle_3",
+    "idle_look": "Happy_Sway_Standing",
+    "walk": "Walking_Woman",
+    "run": "Run_02",
+    "jump_start": "Regular_Jump",
+    "celebrate": "Happy_jump_f",
+    "handoff": "Wave_One_Hand",
+    "emote_wave": "Wave_One_Hand",
+    "emote_cheer": "Happy_jump_f"
+  },
+  "sockets": {
+    "hand_R": "RightHand",
+    "hand_L": "LeftHand",
+    "head": "Head"
+  },
+  "fallback": {
+    "clips": {
+      "carry_idle": "idle",
+      "carry_run": "run",
+      "fall": "jump_start",
+      "land": "idle",
+      "glide_in": "jump_start",
+      "glide": "jump_start",
+      "glide_out": "idle",
+      "sit": "idle",
+      "emote_laugh": "idle_look",
+      "emote_love": "idle_look",
+      "emote_dance": "idle_look",
+      "emote_thumbsup": "emote_wave",
+      "carry_walk": "walk"
+    }
+  },
+  "notes": {
+    "source": "Meshy image-to-3D from tools/concepts/heroine-front.png (A-pose), auto-rigged, library animations 243, 1, 14, 466, 552, 44, 290, 415. Tasks: image 01a1bb5c-3151-7501-8deb-dc0284a1f6c7, rig 01a1bb5e-008c-77f0-ab5e-8c2ca3e1d3e9.",
+    "rig": "24 joints, Mixamo-style names, centimetre units under an Armature scaled 0.01.",
+    "motion": "Walking_Woman and Run_02 arrive in place; the factory measures their speed from the planted foot (1.26 and 3.85 m/s). Carry_Water_Bucket_Walk (552) was generated but is not a loop — mostly standing with the bucket — so carrying uses the ordinary walk, with the lantern on its spring."
+  }
+}

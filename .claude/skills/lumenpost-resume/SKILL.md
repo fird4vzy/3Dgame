@@ -38,8 +38,8 @@ Report pass/fail counts. Don't start new work on a red tree without saying so.
 
 - **The Spire** district is the only one still primitive-only (`buildDistrictProps` → `buildRocks`) besides the authored lighthouse.
 - `villager_child.glb` is retired from the cast until a properly proportioned model exists.
-- Look follow-ups in `docs/24` "Still to do": day/night + weather (the reference's other moods), normal maps for Meshy buildings, MToon player ignores the atmosphere glow.
-- The 16.5 MB `aria.vrm` breaks the 6 MB download budget on its own.
+- Look follow-ups in `docs/24` "Still to do": day/night + weather (the reference's other moods), normal maps for Meshy buildings.
+- The player is the Meshy heroine (`docs/26`, manifest `src/data/characters/heroine.character.json`); more clips go onto the same rig with `tools/meshy.mjs animate <rigTaskId>`. The 16.5 MB `aria.vrm` is only a fallback now — could be deleted from `public/` to shrink the build.
 - Roadmap Phase 5 (accessibility, photo mode, juice pass) and Phase 6 (optimisation, device matrix) not started as such.
 - Branch `claude/browser-game-design-tm60li` has never been merged to `main`.
 

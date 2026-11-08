@@ -9,6 +9,7 @@ import type { RendererService } from '@engine/render/RendererService';
 import type { MusicDirector } from '@engine/audio/MusicDirector';
 import type { IScene } from '@engine/scene/IScene';
 import type { LoadedCharacter } from '@engine/character/CharacterFactory';
+import type { ClipName } from '@engine/character/CharacterDefinition';
 import { shouldBeVisible } from '@core/math/spherical';
 import { PLANET_RADIUS, PLAYER_HEIGHT, SEA_LEVEL_RADIUS, WORLD_SEED } from '@config/constants';
 
@@ -198,6 +199,8 @@ export class PlanetScene implements IScene {
   private parcelParent: THREE.Object3D | null = null;
   private currentDistrict: DistrictId | null = null;
   private bobTimer = 0;
+  /** Seconds left of a one-shot (a celebration) that locomotion must not cut off. */
+  private oneShotTimer = 0;
   private lastDelta = 1 / 60;
   private menuMode = false;
   private menuOrbit = 0;
@@ -1102,8 +1105,18 @@ export class PlanetScene implements IScene {
     this.parcelVisual.glow.intensity = 2 + warmth * 3;
   }
 
+  /** Play a clip once, holding off locomotion clips while she stands still. */
+  private playOneShot(clip: ClipName, seconds: number): void {
+    if (!this.character) return;
+    this.character.play(clip, true);
+    this.oneShotTimer = seconds;
+  }
+
   /** The hand-off burst: lumen motes rising off the parcel as it changes hands. */
   private celebrate(): void {
+    // A character with a celebration clip jumps for joy; one without simply
+    // resolves it to its idle through the fallback chain.
+    this.playOneShot('celebrate', 2.4);
     const position = this.player.object3D.position.clone();
     _emitUp.copy(position).normalize();
     position.addScaledVector(_emitUp, 1.1);
@@ -1332,6 +1345,13 @@ export class PlanetScene implements IScene {
     }
 
     this.character.update(dt);
+
+    // A one-shot plays out while she stands still; moving cuts it short.
+    if (this.oneShotTimer > 0) {
+      this.oneShotTimer -= dt;
+      if (this.controller.state === 'idle' && !this.glide.isGliding) return;
+      this.oneShotTimer = 0;
+    }
 
     if (this.glide.isGliding) {
       this.character.play('glide');

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as THREE from 'three';
 import { EventBus } from '../../src/core/events/EventBus';
 import { SceneManager } from '../../src/engine/scene/SceneManager';
 import type { IScene } from '../../src/engine/scene/IScene';
@@ -7,6 +8,7 @@ import { migrate } from '../../src/engine/save/migrations';
 import { SAVE_VERSION, createDefaultSave } from '../../src/engine/save/schema';
 import { SaveManager, type StorageLike } from '../../src/engine/save/SaveManager';
 import { ClipResolver } from '../../src/engine/character/ClipResolver';
+import { prepareClip } from '../../src/engine/character/CharacterFactory';
 import {
   validateCharacterDefinition,
   type CharacterDefinition,
@@ -338,5 +340,46 @@ describe('GameStateManager', () => {
     bus.on('state:changed', (p) => seen.push(`${p.from}->${p.to}`));
     new GameStateManager(bus).send('engineReady');
     expect(seen).toEqual(['boot->preload']);
+  });
+});
+
+describe('captured clips play in place', () => {
+  // A walk recorded across a stage: the hips travel 2 m forward in 1 s while
+  // bobbing and swaying, the way library clips arrive.
+  function stageWalk(): THREE.AnimationClip {
+    const times: number[] = [];
+    const values: number[] = [];
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10;
+      times.push(t);
+      values.push(0.05 * Math.sin(t * Math.PI * 2), 1 + 0.03 * Math.sin(t * Math.PI * 4), 2 * t);
+    }
+    return new THREE.AnimationClip('walk', 1, [
+      new THREE.VectorKeyframeTrack('Hips.position', times, values),
+    ]);
+  }
+
+  it('measures the ground speed it was recorded at', () => {
+    expect(prepareClip(stageWalk(), 'Hips', false)).toBeCloseTo(2, 5);
+  });
+
+  it('removes the travel and keeps the sway and the bob', () => {
+    const clip = stageWalk();
+    prepareClip(clip, 'Hips', false);
+    const v = clip.tracks[0]!.values;
+    const last = v.length - 3;
+    expect(v[last + 2]).toBeCloseTo(v[2]!, 5); // no net forward travel
+    expect(Math.max(...[0, 3, 6, 9].map((i) => Math.abs(v[i]!)))).toBeGreaterThan(0.02); // sway kept
+    expect(v[4]).not.toBeCloseTo(v[1]!, 3); // bob kept
+  });
+
+  it('lets the controller do the jumping', () => {
+    const times = [0, 0.3, 0.6, 1];
+    const values = [0, 1, 0, 0, 0.8, 0, 0, 1.6, 0, 0, 1, 0]; // crouch, rise, land
+    const clip = new THREE.AnimationClip('jump', 1, [new THREE.VectorKeyframeTrack('Hips.position', times, values)]);
+    prepareClip(clip, 'Hips', true);
+    const ys = [1, 4, 7, 10].map((i) => clip.tracks[0]!.values[i]!);
+    expect(Math.max(...ys)).toBeCloseTo(1, 5); // never above standing height
+    expect(ys[1]).toBeCloseTo(0.8, 5); // the crouch survives
   });
 });
