@@ -127,9 +127,52 @@ export class InputManager {
     this.disposers = [];
   }
 
+  /**
+   * Gameplay input on or off. Off also hands the cursor back, since every
+   * reason to turn input off — a menu, the pause screen, a conversation —
+   * wants a pointer to click with. On takes it again, if the browser allows
+   * (it needs a recent click or key press; failing that, the next click on
+   * the canvas takes it).
+   */
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
-    if (!enabled) this.releaseAll();
+    if (!enabled) {
+      this.releaseAll();
+      this.unlockPointer();
+    } else {
+      this.lockPointer();
+    }
+  }
+
+  // ── mouse look ───────────────────────────────────────────────────────────
+  //
+  // Moving the mouse turns the camera, with no button held: the pointer is
+  // locked to the canvas while playing, the way a game on the desktop works.
+  // Dragging with a button still turns it wherever the lock is unavailable
+  // (or refused), so nothing depends on the lock.
+
+  /** True while the pointer is locked to the canvas. */
+  get pointerLocked(): boolean {
+    return typeof document !== 'undefined' && document.pointerLockElement === this.target;
+  }
+
+  /** Ask for the pointer lock. Harmless when not allowed; the browser just refuses. */
+  lockPointer(): void {
+    if (!this.enabled || this.device === 'touch' || this.pointerLocked) return;
+    const request = (this.target as HTMLElement & { requestPointerLock?: () => Promise<void> | void })
+      .requestPointerLock;
+    if (typeof request !== 'function') return;
+    try {
+      const pending: unknown = request.call(this.target);
+      // Current browsers return a promise and reject it without a gesture.
+      if (pending instanceof Promise) pending.catch(() => undefined);
+    } catch {
+      // Older ones throw instead.
+    }
+  }
+
+  unlockPointer(): void {
+    if (this.pointerLocked) document.exitPointerLock();
   }
 
   get activeDevice(): DeviceKind {
@@ -342,6 +385,8 @@ export class InputManager {
     }
 
     this.setDevice('keyboard');
+    // A click on the canvas is the gesture the lock needs.
+    if (!this.pointerLocked) this.lockPointer();
     this.pointerDragging = true;
     this.activePointerId = e.pointerId;
   };
@@ -366,6 +411,12 @@ export class InputManager {
       return;
     }
 
+    // Locked: every movement looks, button or not.
+    if (this.pointerLocked) {
+      this.pointerDelta.x += e.movementX;
+      this.pointerDelta.y += e.movementY;
+      return;
+    }
     if (!this.pointerDragging || e.pointerId !== this.activePointerId) return;
     this.pointerDelta.x += e.movementX;
     this.pointerDelta.y += e.movementY;

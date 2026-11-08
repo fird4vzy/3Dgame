@@ -56,7 +56,8 @@ export class RendererService {
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     }
 
-    this.camera = new THREE.PerspectiveCamera(BASE_VFOV_DEG, 1, 0.1, 400);
+    // Far enough for the mountain past the rim (game/world/Fuji, ~400 m).
+    this.camera = new THREE.PerspectiveCamera(BASE_VFOV_DEG, 1, 0.1, 650);
     this.postFX = new PostFX(this.renderer, this.camera, viewport.tier);
 
     canvas.addEventListener('webglcontextlost', this.onContextLost);

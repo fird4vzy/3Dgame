@@ -121,4 +121,39 @@ describe('standing still', () => {
     expect(player.object3D.position.distanceTo(settled)).toBeLessThan(0.002);
     expect(controller.planarSpeed).toBeLessThan(1e-3);
   });
+
+  it('stands plumb on a slope, not tilted to it', () => {
+    const world = new BvhWorld();
+    world.build(slope(22));
+
+    const input = {
+      getAxis2D: () => ({ x: 0, y: 0 }),
+      isDown: () => false,
+      wasPressedWithin: () => false,
+      consume: () => {},
+    } as unknown as InputManager;
+    const bus = { emit: () => {} } as unknown as EventBus;
+
+    const player = new Entity('player', new THREE.Group());
+    player.object3D.position.set(0, 60, 0);
+    const controller = player.addComponent(
+      new SphericalCharacterController({
+        world,
+        input,
+        bus,
+        camera: new THREE.PerspectiveCamera(),
+        heading: (out) => out.set(0, 0, 1),
+      }),
+    );
+    for (let i = 0; i < 120; i++) controller.fixedUpdate(1 / 60);
+
+    // On the ground, and the ground is tilted...
+    expect(controller.grounded).toBe(true);
+    const radial = player.object3D.position.clone().normalize();
+    expect(controller.groundNormal.angleTo(radial)).toBeGreaterThan(THREE.MathUtils.degToRad(15));
+    // ...but she is not: a body tilted to a 22° slope leaned back like
+    // someone about to fall over.
+    const bodyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(player.object3D.quaternion);
+    expect(THREE.MathUtils.radToDeg(bodyUp.angleTo(radial))).toBeLessThan(1);
+  });
 });

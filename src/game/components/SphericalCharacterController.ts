@@ -280,14 +280,20 @@ export class SphericalCharacterController extends Component {
   }
 
   /**
-   * Align the character's local +Y to the ground normal and its local +Z to the
-   * direction of travel, then slerp so the correction is never a snap.
+   * Stand the character up along local gravity, face the direction of
+   * travel, and slerp so the correction is never a snap.
+   *
+   * Plumb, not along the ground normal. People stand vertical on a slope;
+   * a body tilted to the slope leans back going uphill and forward going
+   * down, and on the 25° flanks of the village hills she leaned back like
+   * someone about to fall over. The feet meet the slope a few centimetres
+   * off, in grass that hides them.
    */
   private orientToSurface(dt: number): void {
     const transform = this.entity.object3D;
     _up.copy(transform.position).normalize();
 
-    const surfaceUp = this.grounded ? this.groundNormal : _up;
+    const surfaceUp = _up;
 
     _horizontal.copy(this.velocity).projectOnPlane(surfaceUp);
     if (_horizontal.lengthSq() > 0.04) {

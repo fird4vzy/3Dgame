@@ -30,7 +30,7 @@ Report pass/fail counts. Don't start new work on a red tree without saying so.
 ## 3. Know where the "plan" lives
 
 - `docs/13-roadmap.md` — phases 0–7. Later work went past the roadmap (VRM player Aria, Japanese village art, Meshy pipeline, the painterly look).
-- `docs/14..27-*.md` — per-feature build logs. `docs/24-cinematic-look.md` is the rendering rebuild (PBR, atmosphere, grass, trees, water) and its "Still to do" list; `docs/25` solid world; `docs/26`–`27` the courier. Work between 2026-08-01 and 2026-09-20 is documented only in commit messages.
+- `docs/14..28-*.md` — per-feature build logs. `docs/24-cinematic-look.md` is the rendering rebuild (PBR, atmosphere, grass, trees, water) and its "Still to do" list; `docs/25` solid world; `docs/26`–`28` the courier, `docs/28` also Fuji and mouse look. Work between 2026-08-01 and 2026-09-20 is documented only in commit messages.
 - `public/assets/models/README.md` — the asset pipeline rules.
 - `src/data/content.ts` — districts, NPCs, contracts.
 
@@ -40,7 +40,8 @@ Report pass/fail counts. Don't start new work on a red tree without saying so.
 - `villager_child.glb` is retired from the cast until a properly proportioned model exists.
 - Look follow-ups in `docs/24` "Still to do": day/night + weather (the reference's other moods), normal maps for Meshy buildings.
 - The player is Aria (`aria.vrm`), dressed from the character sheet at load (`entities/outfit.ts`) and moving with the Meshy heroine's captured clips retargeted onto her rig (`entities/retarget.ts`, `docs/27`). Clip mapping lives in `src/data/characters/heroine.character.json`; new clips: `tools/meshy.mjs animate <rigTaskId>` (ask before spending credits), then rebuild the clip file with `node tools/motion-only.mjs public/assets/characters/heroine.glb public/assets/characters/heroine-motion.glb src/data/characters/heroine.character.json` (joints + named clips, no mesh). The Meshy mesh `heroine.glb` is only the fallback.
-- Open on the courier: the top is sleeveless (the sheet has rolled sleeves; needs new geometry), the hair is static (springbones off), the VRM is a 16.5 MB download.
+- Her clothes are one palette in `entities/outfit.ts` (`OUTFIT`: burgundy knit, mocha trousers, docs/28). Open on the courier: the top is sleeveless (needs new geometry), the hair is static (springbones off), the VRM is a 16.5 MB download.
+- Mount Fuji (`world/Fuji.ts`, placed by `fujiFromTheVillage` in `PlanetScene`) is the backdrop to the village; mouse look is pointer lock in `engine/input/InputManager`, following `setEnabled`.
 - Roadmap Phase 5 (accessibility, photo mode, juice pass) and Phase 6 (optimisation, device matrix) not started as such.
 - Branch `claude/browser-game-design-tm60li` has never been merged to `main`.
 

@@ -10,7 +10,8 @@ import type { MusicDirector } from '@engine/audio/MusicDirector';
 import type { IScene } from '@engine/scene/IScene';
 import type { LoadedCharacter } from '@engine/character/CharacterFactory';
 import type { ClipName } from '@engine/character/CharacterDefinition';
-import { shouldBeVisible } from '@core/math/spherical';
+import { latLonToCartesian, shouldBeVisible } from '@core/math/spherical';
+import { atmosphereUniforms } from '@engine/render/Atmosphere';
 import { PLANET_RADIUS, PLAYER_HEIGHT, SEA_LEVEL_RADIUS, WORLD_SEED } from '@config/constants';
 
 import { PlanetTerrain } from '@game/world/PlanetTerrain';
@@ -53,6 +54,7 @@ import { loadInstancedProp, type InstancedPropOptions } from '@engine/render/ins
 import { loadStylisedModel } from '@engine/render/stylise';
 import { createStarfield } from '@game/world/Skydome';
 import { Environment } from '@game/world/Environment';
+import { Fuji, type FujiPlacement } from '@game/world/Fuji';
 import { GrassField } from '@game/world/GrassField';
 import { plantTrees, updateTrees, type TreeSpecies } from '@game/world/Trees';
 import { WaterReflection } from '@game/world/WaterReflection';
@@ -155,6 +157,7 @@ export class PlanetScene implements IScene {
   private readonly cameraOccluders: THREE.Object3D[] = [];
   /** Sky, sun, air and the light they cast. */
   private environment!: Environment;
+  private fuji: Fuji | null = null;
   private grass: GrassField | null = null;
   private waterReflection: WaterReflection | null = null;
   /** Set once onEnter has handed the rig its occluders; later trunks register themselves. */
@@ -270,13 +273,14 @@ export class PlanetScene implements IScene {
 
   setPaused(paused: boolean): void {
     this.paused = paused;
-    this.input.setEnabled(!paused && !this.playerLocked);
+    // Never during the menu: input on also locks the pointer for mouse look.
+    this.input.setEnabled(!paused && !this.playerLocked && !this.menuMode);
   }
 
   /** Freeze the player during conversations without pausing the world. */
   setPlayerLocked(locked: boolean): void {
     this.playerLocked = locked;
-    this.input.setEnabled(!locked && !this.paused);
+    this.input.setEnabled(!locked && !this.paused && !this.menuMode);
   }
 
   /**
@@ -457,6 +461,16 @@ export class PlanetScene implements IScene {
       dt,
     );
     this.cullBelowHorizon();
+    if (this.fuji) {
+      // Like the sky: the orbital menu shot is the planet against space.
+      this.fuji.mesh.visible = !this.menuMode;
+      this.fuji.update({
+        sunDirection: this.environment.sunDirection,
+        sun: this.environment.sun,
+        haze: this.environment.hazeColour,
+        hazeDensity: atmosphereUniforms.atmoParams.value.x,
+      });
+    }
 
     if (this.character) {
       this.player.object3D.getWorldDirection(_charFacing);
@@ -589,6 +603,9 @@ export class PlanetScene implements IScene {
     this.waterReflection.setWetPoints(openWater(3000));
     this.addStars(scene);
     scene.add(this.particles.mesh);
+
+    this.fuji = new Fuji(fujiFromTheVillage());
+    scene.add(this.fuji.mesh);
   }
 
   private buildLighting(): void {
@@ -1753,4 +1770,25 @@ export class PlanetScene implements IScene {
       object.visible = shouldBeVisible(object, viewer, PLANET_RADIUS);
     }
   }
+}
+
+/**
+ * Where Fuji stands: west-south-west of the village, 460 m out, its peak 9°
+ * above the village's horizon and its foot well below the rim.
+ *
+ * West-south-west because that is where the village looks out. It sits in a
+ * hollow, and toward the south-east (front-lit, opposite the sun) the hill
+ * under the shrine hid everything but the very tip; a terrain-horizon survey
+ * found the land falling away to the west. The sun, north-north-west of
+ * everyone (Environment's SUN_AZIMUTH), lights it from the side (docs/28).
+ */
+function fujiFromTheVillage(): FujiPlacement {
+  const landing = DISTRICTS.find((d) => d.id === 'landing');
+  const c = latLonToCartesian(landing?.centre.lat ?? 62, landing?.centre.lon ?? 30, 1);
+  const up = new THREE.Vector3(c.x, c.y, c.z).normalize();
+  const north = new THREE.Vector3(0, 1, 0).projectOnPlane(up).normalize();
+  const east = new THREE.Vector3().crossVectors(up, north).normalize();
+  const bearing = THREE.MathUtils.degToRad(250);
+  const toward = north.multiplyScalar(Math.cos(bearing)).addScaledVector(east, Math.sin(bearing));
+  return { up, toward, distance: 460, base: -15, height: 150, radius: 350 };
 }

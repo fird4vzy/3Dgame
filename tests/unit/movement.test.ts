@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { computeMovementBasis, inputToWorld } from '../../src/game/components/movementBasis';
+import { InputManager } from '../../src/engine/input/InputManager';
+import type { EventBus } from '../../src/core/events/EventBus';
 
 const v = () => new THREE.Vector3();
 
@@ -102,5 +104,76 @@ describe('input mapping', () => {
 
   it('produces no movement for no input', () => {
     expect(inputToWorld({ x: 0, y: 0 }, basis, v()).length()).toBeCloseTo(0, 6);
+  });
+});
+
+describe('mouse look', () => {
+  /** Just enough of the pointer-lock API: a document and a canvas that can be locked. */
+  function fakePage(): { input: InputManager; calls: string[]; restore: () => void } {
+    const calls: string[] = [];
+    const page = { pointerLockElement: null as unknown, exitPointerLock: () => undefined };
+    const canvas = {
+      requestPointerLock: () => {
+        calls.push('lock');
+        page.pointerLockElement = canvas;
+        return Promise.resolve();
+      },
+    };
+    page.exitPointerLock = () => {
+      calls.push('unlock');
+      page.pointerLockElement = null;
+    };
+    const had = 'document' in globalThis;
+    const previous = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = page;
+    const input = new InputManager(canvas as unknown as HTMLElement, { emit: () => undefined } as unknown as EventBus);
+    const restore = (): void => {
+      if (had) (globalThis as { document?: unknown }).document = previous;
+      else delete (globalThis as { document?: unknown }).document;
+    };
+    return { input, calls, restore };
+  }
+
+  it('takes the pointer when play starts and gives it back for menus', () => {
+    const { input, calls, restore } = fakePage();
+    try {
+      input.setEnabled(false);
+      expect(calls).toEqual([]);
+      input.setEnabled(true);
+      expect(input.pointerLocked).toBe(true);
+      input.setEnabled(false);
+      expect(calls).toEqual(['lock', 'unlock']);
+      expect(input.pointerLocked).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('turns the camera on plain mouse movement while locked, no button held', () => {
+    const { input, restore } = fakePage();
+    try {
+      input.setEnabled(true);
+      const move = (input as unknown as { onPointerMove: (e: Partial<PointerEvent>) => void }).onPointerMove;
+      move({ pointerType: 'mouse', pointerId: 1, movementX: 6, movementY: -3 });
+      move({ pointerType: 'mouse', pointerId: 1, movementX: 4, movementY: 1 });
+      input.beginFrame(1 / 60);
+      expect(input.getAxis2D('look')).toEqual({ x: 10, y: -2 });
+    } finally {
+      restore();
+    }
+  });
+
+  it('ignores plain movement when not locked, as before', () => {
+    const { input, restore } = fakePage();
+    try {
+      input.setEnabled(false);
+      const move = (input as unknown as { onPointerMove: (e: Partial<PointerEvent>) => void }).onPointerMove;
+      (input as unknown as { enabled: boolean }).enabled = true;
+      move({ pointerType: 'mouse', pointerId: 1, movementX: 6, movementY: -3 });
+      input.beginFrame(1 / 60);
+      expect(input.getAxis2D('look')).toEqual({ x: 0, y: 0 });
+    } finally {
+      restore();
+    }
   });
 });

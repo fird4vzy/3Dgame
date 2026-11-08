@@ -1,18 +1,32 @@
 import * as THREE from 'three';
 
 /**
- * Re-dress the VRoid model as the courier on her character sheet.
+ * Dress the VRoid model in the courier's clothes.
  *
- * The model already has the sheet's long dark hair, glasses and white
- * sneakers; what differs is the outfit — a navy sleeveless top and dark
- * jeans, where the sheet has a white shirt with lavender pinstripes and light
- * jeans. Both are repainted at load from the model's own textures, which
+ * The model already has her long dark hair, glasses and white sneakers. What
+ * it wore was a navy sleeveless top and dark jeans; she likes burgundy and
+ * brown, so the top becomes a burgundy knit and the jeans brown wide-leg
+ * trousers. Both are repainted at load from the model's own textures, which
  * keeps every seam, pocket and fold the artist drew and only changes the
  * cloth. The geometry is untouched: the top stays sleeveless.
  *
- * Colours are the sheet's, picked off the drawing: shirt `#f4f3f7`, stripes
- * `#9e8ed4`, denim `#a7c2e2`.
+ * (The first dressing was the character sheet's white shirt with lavender
+ * stripes and light jeans, docs/27. Its lessons hold for any colour: bleed
+ * the cloth under cut-away texels, keep the trims, and check the top still
+ * reads as cloth against her skin from behind in golden light.)
  */
+
+type RGB = readonly [number, number, number];
+
+/** Her clothes, in sRGB. */
+export const OUTFIT = {
+  /** Burgundy knit top. */
+  top: [88, 22, 36] as RGB,
+  /** Brown wide-leg trousers. */
+  trousers: [100, 78, 62] as RGB,
+  /** The trousers' shadow tone. VRoid's default is a cool pink, which reads as a stain on brown. */
+  trousersShade: new THREE.Color('#cdc3bd'),
+};
 
 /** A VRM's MToon material, as far as this module needs it. */
 type ClothMaterial = THREE.Material & {
@@ -21,31 +35,27 @@ type ClothMaterial = THREE.Material & {
   shadeColorFactor?: THREE.Color;
 };
 
-const SHIRT = [244, 243, 247] as const;
-const STRIPE = [158, 142, 212] as const;
-const DENIM = [167, 194, 226] as const;
-/** The jeans' shadow tone. VRoid's default is a warm pink, which reads as a stain on pale blue. */
-const DENIM_SHADE = new THREE.Color('#c6d2ea');
-
-/** Repaint the top and the jeans of a VRoid model. Safe to call where there is no DOM. */
-export function dressFromSheet(root: THREE.Object3D): void {
+/** Repaint the top and the trousers of a VRoid model. Safe to call where there is no DOM. */
+export function dressAria(root: THREE.Object3D): void {
   if (typeof document === 'undefined') return;
   const painted = new Map<THREE.Texture, THREE.Texture | null>();
+  const top = knit(OUTFIT.top);
+  const trousers = cloth(OUTFIT.trousers);
 
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
     for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-      const cloth = material as ClothMaterial;
-      const paint = /_Tops_/.test(material.name) ? stripedShirt : /_Bottoms_/.test(material.name) ? lightDenim : null;
+      const garment = material as ClothMaterial;
+      const paint = /_Tops_/.test(material.name) ? top : /_Bottoms_/.test(material.name) ? trousers : null;
       if (!paint) continue;
-      if (paint === lightDenim) cloth.shadeColorFactor?.copy(DENIM_SHADE);
+      if (paint === trousers) garment.shadeColorFactor?.copy(OUTFIT.trousersShade);
       for (const slot of ['map', 'shadeMultiplyTexture'] as const) {
-        const source = cloth[slot];
+        const source = garment[slot];
         if (!source) continue;
         if (!painted.has(source)) painted.set(source, repaint(source, paint));
         const replacement = painted.get(source);
-        if (replacement) cloth[slot] = replacement;
+        if (replacement) garment[slot] = replacement;
       }
     }
   });
@@ -82,7 +92,7 @@ function repaint(source: THREE.Texture, paint: Painter): THREE.Texture | null {
   // mip chain averages into the edges of a cut-out, and black there drew a
   // dark rim round the hem and armholes at any distance.
   const texture = new THREE.DataTexture(new Uint8Array(pixels.buffer), width, height, THREE.RGBAFormat);
-  texture.name = `${source.name || 'cloth'}_sheet`;
+  texture.name = `${source.name || 'cloth'}_dressed`;
   texture.flipY = source.flipY;
   texture.colorSpace = source.colorSpace;
   texture.wrapS = source.wrapS;
@@ -111,57 +121,54 @@ function meanLuminance(pixels: Uint8ClampedArray, include: (i: number) => boolea
 }
 
 /**
- * White cotton with lavender pinstripes.
+ * A ribbed knit in `colour`.
  *
- * The cloth's own shading is kept as a gentle multiplier (folds under the
- * arms stay folds), and the stripes run straight down the texture, which
- * on this layout is straight down the body. About two centimetres apart on
- * her, a little bolder than the sheet's pinstripe: from where the camera
- * sits, finer stripes average out to plain white, and under golden-hour
- * light plain white is the colour of her skin — from behind she read as
- * shirtless. A fifth of the cloth in lavender keeps it a cool white.
+ * The cloth's own shading is kept as a multiplier (folds under the arms stay
+ * folds) and fine ribs run straight down the texture, which on this layout
+ * is straight down the body, about 8 mm apart on her: from where the camera
+ * sits they melt into the colour, close up they make it read as knitwear
+ * rather than plastic.
  */
-export const stripedShirt: Painter = (pixels, width) => {
-  const mean = meanLuminance(pixels, (i) => pixels[i + 3]! > 128);
-  const period = Math.max(8, Math.round(width / 40));
-  const half = Math.max(1.2, period * 0.1);
-  for (let i = 0; i < pixels.length; i += 4) {
-    if (pixels[i + 3] === 0) {
-      // Cut away, but bled the shirt's colour, so mips fade the edge to white.
-      pixels[i] = SHIRT[0];
-      pixels[i + 1] = SHIRT[1];
-      pixels[i + 2] = SHIRT[2];
-      continue;
+export function knit(colour: RGB): Painter {
+  return (pixels, width) => {
+    const mean = meanLuminance(pixels, (i) => pixels[i + 3]! > 128);
+    const period = Math.max(4, Math.round(width / 96));
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i + 3] === 0) {
+        // Cut away, but bled the cloth's colour, so mips fade the edge to it.
+        pixels[i] = colour[0];
+        pixels[i + 1] = colour[1];
+        pixels[i + 2] = colour[2];
+        continue;
+      }
+      const shade = THREE.MathUtils.clamp(1 - (1 - luminance(pixels, i) / mean) * 0.6, 0.7, 1.08);
+      const x = (i / 4) % width;
+      const rib = 0.5 + 0.5 * Math.cos(((x + 0.5) / period) * Math.PI * 2);
+      const tone = shade * (1 - 0.16 * rib);
+      for (let c = 0; c < 3; c++) pixels[i + c] = colour[c]! * tone;
     }
-    const shade = THREE.MathUtils.clamp(1 - (1 - luminance(pixels, i) / mean) * 0.55, 0.72, 1.04);
-    const x = (i / 4) % width;
-    // Coverage by the stripe whose centre line runs mid-period, antialiased
-    // over one pixel.
-    const distance = Math.abs(((x + 0.5) % period) - period / 2);
-    const stripe = THREE.MathUtils.clamp(half + 0.5 - distance, 0, 1) * 0.9;
-    for (let c = 0; c < 3; c++) {
-      pixels[i + c] = (SHIRT[c]! + (STRIPE[c]! - SHIRT[c]!) * stripe) * shade;
-    }
-  }
-};
+  };
+}
 
 /**
- * Light-wash denim.
+ * Woven cloth in `colour`, from the jeans' texture.
  *
  * Everything is repainted except the trims — gold stitching, rivets, the
- * leather patch, the red tab — which keep their colours, as on real jeans.
- * The weave, fades and seams come through as variation in brightness around
- * the new colour, so a dark seam stays a seam rather than a black line.
+ * leather patch, the red tab — which keep their colours, as they would on
+ * real trousers. The weave, fades and seams come through as variation in
+ * brightness around the new colour, so a seam stays a seam.
  */
-export const lightDenim: Painter = (pixels) => {
-  const trim = (i: number): boolean => {
-    const r = pixels[i]!;
-    return r > pixels[i + 2]! + 18 && r - Math.min(pixels[i + 1]!, pixels[i + 2]!) > 24;
+export function cloth(colour: RGB): Painter {
+  return (pixels) => {
+    const trim = (i: number): boolean => {
+      const r = pixels[i]!;
+      return r > pixels[i + 2]! + 18 && r - Math.min(pixels[i + 1]!, pixels[i + 2]!) > 24;
+    };
+    const mean = meanLuminance(pixels, (i) => !trim(i));
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (trim(i)) continue;
+      const shade = THREE.MathUtils.clamp(0.55 + 0.45 * (luminance(pixels, i) / mean), 0.45, 1.2);
+      for (let c = 0; c < 3; c++) pixels[i + c] = colour[c]! * shade;
+    }
   };
-  const mean = meanLuminance(pixels, (i) => !trim(i));
-  for (let i = 0; i < pixels.length; i += 4) {
-    if (trim(i)) continue;
-    const shade = THREE.MathUtils.clamp(0.58 + 0.42 * (luminance(pixels, i) / mean), 0.5, 1.18);
-    for (let c = 0; c < 3; c++) pixels[i + c] = DENIM[c]! * shade;
-  }
-};
+}

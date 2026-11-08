@@ -12,7 +12,7 @@ import type { CharacterDefinition, ClipName } from '@engine/character/CharacterD
 import { ClipResolver } from '@engine/character/ClipResolver';
 import { POSES, CLIP_POSE, type Pose } from './CourierAnimator';
 import { retargetToVrm, type RetargetedClip } from './retarget';
-import { dressFromSheet } from './outfit';
+import { dressAria } from './outfit';
 import {
   airPose,
   armSwing,
@@ -368,9 +368,9 @@ export class VrmCharacter implements LoadedCharacter {
         mesh.frustumCulled = false;
       });
 
-      // Dressed as on her character sheet: a white shirt with lavender
-      // pinstripes and light jeans, painted over the model's own textures.
-      dressFromSheet(vrm.scene);
+      // In the burgundy and brown she likes, painted over the model's own
+      // textures (entities/outfit).
+      dressAria(vrm.scene);
 
       _box.setFromObject(vrm.scene);
       _box.getSize(_size);

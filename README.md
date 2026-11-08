@@ -17,9 +17,10 @@ npm run test:play    # full delivery playthrough in a browser
 npm run test:all     # typecheck + lint + unit + build
 ```
 
-Controls: **WASD** to move, **Shift** to run, **Space** to jump, drag the mouse
-to look. Gamepad and touch (floating joystick on the left half, drag to look on
-the right) both work. The dev build shows a debug overlay with frame rate,
+Controls: **WASD** to move, **Shift** to run, **Space** to jump, move the mouse
+to look (the game takes the pointer when you start or click it; **Esc** pauses
+and gives it back). Gamepad and touch (floating joystick on the left half,
+drag to look on the right) both work. The dev build shows a debug overlay with frame rate,
 locomotion state and your position in the (lat, lon, alt) coordinates level data
 is authored in.
 
@@ -60,12 +61,14 @@ is authored in.
   water; MSAA, bloom, AgX and a film grade
 - Authored Japanese village (Meshy image-to-3D); collision with every house,
   trunk, gate post and lantern ([`docs/25`](docs/25-solid-world.md))
-- The courier: the VRoid model (Aria), dressed as on her character sheet,
-  moving with captured animation (walk, run, a jump timed to the real arc, a
+- The courier: the VRoid model (Aria), dressed in the burgundy and brown she
+  likes, moving with captured animation (walk, run, a jump timed to the real arc, a
   jump for joy after each delivery) retargeted onto her rig at load
   ([`docs/27`](docs/27-aria-in-motion.md)). The Meshy model generated from
   the sheet ([`docs/26`](docs/26-the-heroine.md)) is the fallback
-- 235 unit tests, two browser suites including a full scripted playthrough
+- Mount Fuji over the village, beyond the planet's rim
+  ([`docs/28`](docs/28-fuji-and-the-courier-in-burgundy.md))
+- 243 unit tests, two browser suites including a full scripted playthrough
 
 Payload today: 0.3 MB gzipped JS, 6.6 MB of models, 16.5 MB for the VRM plus
 0.5 MB of captured clips, 2.2 MB of audio. Grass, trees, leaf textures, sky

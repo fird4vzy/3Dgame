@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { GrassField } from '../../src/game/world/GrassField';
 import { plantTrees } from '../../src/game/world/Trees';
 import { isSoftwareRenderer } from '../../src/engine/platform/Viewport';
+import { Fuji, fujiProfile } from '../../src/game/world/Fuji';
 
 /**
  * A 10 m square of planet surface at the north pole, carrying the attributes
@@ -156,5 +157,45 @@ describe('quality tier', () => {
     expect(isSoftwareRenderer('ANGLE (NVIDIA, NVIDIA GeForce RTX 5060 Ti Direct3D11)')).toBe(false);
     expect(isSoftwareRenderer('Apple M2')).toBe(false);
     expect(isSoftwareRenderer('')).toBe(false);
+  });
+});
+
+describe('Fuji', () => {
+  const points = fujiProfile(150, 350);
+  const slope = (a: THREE.Vector2, b: THREE.Vector2): number => Math.abs((b.y - a.y) / (b.x - a.x));
+
+  it('runs a skirt below its foot, so no edge shows over the planet rim', () => {
+    expect(points[0]!.y).toBeLessThan(0);
+    expect(points[0]!.x).toBeGreaterThan(350);
+  });
+
+  it('rises all the way to a flat crater, never back down before it', () => {
+    const flank = points.slice(1, -2);
+    for (let i = 1; i < flank.length; i++) expect(flank[i]!.y).toBeGreaterThan(flank[i - 1]!.y);
+    const rim = flank[flank.length - 1]!;
+    expect(rim.y).toBeGreaterThan(140);
+    expect(points[points.length - 1]!.y).toBeLessThan(rim.y);
+  });
+
+  it('has concave flanks: steep at the top, gentle at the foot', () => {
+    const flank = points.slice(1, -2);
+    const top = slope(flank[flank.length - 2]!, flank[flank.length - 1]!);
+    const foot = slope(flank[1]!, flank[2]!);
+    expect(top).toBeGreaterThan(foot * 2);
+    expect((Math.atan(top) * 180) / Math.PI).toBeGreaterThan(25);
+    expect((Math.atan(top) * 180) / Math.PI).toBeLessThan(35);
+  });
+
+  it('stands upright on the up it is given, at the distance it is given', () => {
+    const up = new THREE.Vector3(1, 2, 0.5).normalize();
+    const toward = new THREE.Vector3(0, 0, 1).projectOnPlane(up).normalize();
+    const fuji = new Fuji({ up, toward, distance: 460, base: -15, height: 150, radius: 350 });
+    const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(fuji.mesh.quaternion);
+    expect(axis.dot(up)).toBeCloseTo(1, 6);
+    const along = fuji.mesh.position.clone().projectOnPlane(up).length();
+    expect(along).toBeCloseTo(460, 3);
+    expect(fuji.mesh.position.dot(up)).toBeCloseTo(-15, 3);
+    expect(fuji.mesh.castShadow).toBe(false);
+    fuji.dispose();
   });
 });

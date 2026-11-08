@@ -62,6 +62,8 @@ generated gait (docs/20), which is complete on its own.
 
 ## Dressed from the sheet (`entities/outfit.ts`)
 
+> Since docs/28 she wears burgundy and brown; the method below is unchanged.
+
 The model already had the sheet's long dark hair, glasses and white
 sneakers. Her navy sleeveless top and dark jeans are repainted at load from
 the model's own textures, so every seam, pocket and fold the artist drew

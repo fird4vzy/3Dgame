@@ -61,6 +61,16 @@ const check = (label, ok, detail) => {
 const browser = await launchBrowser(chromium);
 const page = await browser.newPage({ viewport: { width: 1100, height: 700 } });
 
+// Steering below drags from the same spot for every turn. With the pointer
+// locked (the game locks it on a click, for mouse look), the trip back to that
+// spot is itself a turn and undoes the last one, and she walks in circles.
+// Refuse the lock, as a browser without it would, and steer by the drag
+// fallback. Mouse look itself is covered by the smoke test.
+await page.addInitScript(() => {
+  globalThis.HTMLElement.prototype.requestPointerLock = () =>
+    Promise.reject(new Error('no pointer lock in the playthrough'));
+});
+
 const consoleErrors = [];
 page.on('console', (m) => m.type() === 'error' && consoleErrors.push(m.text()));
 page.on('pageerror', (e) => consoleErrors.push(`PAGEERROR: ${e.message}`));

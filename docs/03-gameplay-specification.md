@@ -48,8 +48,10 @@ Per fixed tick (60 Hz), the `SphericalCharacterController` runs:
 6. **Ground snap**: raycast from `position + up·0.3` along `-up` for 0.5 m. On
    hit within tolerance, snap to the surface and adopt the hit normal as the
    ground normal (prevents launching off convex hilltops).
-7. **Orient**: build the target quaternion from (ground normal as local +Y,
-   velocity direction as local +Z); `slerp` at `ORIENT_LERP` per second.
+7. **Orient**: build the target quaternion from (local gravity up as local +Y,
+   velocity direction as local +Z); `slerp` at `ORIENT_LERP` per second. Not
+   the ground normal: a body tilted to the slope leans back going uphill
+   (docs/28).
 8. Feed planar speed into the animation blend tree.
 
 ### Movement tuning

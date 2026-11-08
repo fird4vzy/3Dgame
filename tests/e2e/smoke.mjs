@@ -122,6 +122,38 @@ check('lands on the surface, not in the void', spawn.grounded, `state=${spawn.st
 check('spawns at plausible altitude', spawn.radius > 50 && spawn.radius < 70, `r=${spawn.radius.toFixed(2)}`);
 check('is idle at rest', spawn.state === 'idle', spawn.state);
 
+// Mouse look: a click on the canvas takes the pointer, and from then on plain
+// movement turns the camera, no button held. Turned there and back again, so
+// the walk below still starts facing the way it always has.
+console.log('\nmouse look');
+const heading = () =>
+  page.evaluate(() => {
+    const v = window.__lumenpost.scene.player.object3D.position.clone();
+    window.__lumenpost.scene.rig.getHeading(v);
+    return v.toArray();
+  });
+const angleBetween = (a, b) => (Math.acos(Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])) * 180) / Math.PI;
+await page.mouse.move(640, 360);
+await page.mouse.down();
+await page.mouse.up();
+await page.waitForTimeout(1500);
+const locked = await page.evaluate(() => document.pointerLockElement?.tagName ?? null);
+check('a click on the game takes the pointer', locked === 'CANVAS', String(locked));
+const lookFrom = await heading();
+for (let i = 1; i <= 10; i++) {
+  await page.mouse.move(640 + i * 20, 360);
+  await page.waitForTimeout(30);
+}
+await page.waitForTimeout(1500);
+const turned = angleBetween(lookFrom, await heading());
+check('moving the mouse turns the camera with no button held', turned > 15, `${turned.toFixed(1)}°`);
+for (let i = 9; i >= 0; i--) {
+  await page.mouse.move(640 + i * 20, 360);
+  await page.waitForTimeout(30);
+}
+await page.waitForTimeout(1500);
+await page.evaluate(() => document.exitPointerLock());
+
 // This suite measures how the controller *feels* — speeds, grounding, the
 // jump — and that needs open ground: from the spawn, a straight twelve-second
 // run goes through the village. Houses, trunks and gates stop the player now,

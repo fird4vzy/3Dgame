@@ -42,7 +42,10 @@ const moods = {
   golden: ['landing', 'bramblewood', 'coil', 'tidebreak', 'spire'],
 };
 
-/** Stand her at the Landing facing `heading` degrees from local north; camera behind or in front. */
+/**
+ * Stand her at the Landing facing `heading` degrees from local north (or toward
+ * the mountain, for `'fuji'`); camera behind or in front.
+ */
 const stage = (lit, heading, front, arm) =>
   page.evaluate(
     ({ lit, heading, front, arm }) => {
@@ -59,7 +62,11 @@ const stage = (lit, heading, front, arm) =>
       s.controller.previousPosition?.copy(pos);
       s.controller.renderPosition?.copy(pos);
       s.controller.velocity?.set(0, 0, 0);
-      const forward = new V(0, 1, 0).projectOnPlane(up).normalize().applyAxisAngle(up, (heading * Math.PI) / 180);
+      const fuji = s.world.scene.getObjectByName('fuji');
+      const forward =
+        heading === 'fuji' && fuji
+          ? fuji.position.clone().sub(pos).projectOnPlane(up).normalize()
+          : new V(0, 1, 0).projectOnPlane(up).normalize().applyAxisAngle(up, (heading * Math.PI) / 180);
       s.player.object3D.lookAt(pos.clone().add(forward));
       s.rig.wantedArm = arm;
       s.rig.currentArm = arm;
@@ -78,6 +85,14 @@ for (const [mood, lit] of Object.entries(moods)) {
     await page.waitForTimeout(1800);
     await page.screenshot({ path: `${out}/player-${mood}-${view}.png` });
   }
+}
+
+// The village looking toward Fuji, in every mood.
+for (const [mood, lit] of Object.entries(moods)) {
+  await stage(lit, 'fuji', false, 4.6);
+  await page.evaluate(() => (window.__lumenpost.scene.rig.pitch = (2 * Math.PI) / 180));
+  await page.waitForTimeout(1800);
+  await page.screenshot({ path: `${out}/player-fuji-${mood}.png` });
 }
 
 // On the move, golden hour, camera behind: walk, then run.
