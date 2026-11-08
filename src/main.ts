@@ -325,35 +325,44 @@ function applyAudioSettings(audio: AudioManager, settings: SettingsManager): voi
  * game remains playable, which is the whole reason the placeholder exists.
  */
 async function attachCharacter(scene: PlanetScene): Promise<void> {
-  // The courier as drawn on her character sheet: generated from it, rigged,
-  // and animated with captured motion (tools/meshy.mjs character). Captured
-  // walks and runs are what the procedural gait could never quite be.
-  try {
-    const [{ loadCharacter }, manifest] = await Promise.all([
-      import('@engine/character/CharacterFactory'),
-      import('./data/characters/heroine.character.json'),
-    ]);
-    const definition = manifest.default as unknown as CharacterDefinition;
-    const heroine = await loadCharacter(definition, import.meta.env.BASE_URL);
-    scene.setCharacter(heroine, definition.height);
-    return;
-  } catch (error) {
-    console.warn('[Character] heroine unavailable; trying the VRM', error);
-  }
+  const base = import.meta.env.BASE_URL;
+  const manifest = await import('./data/characters/heroine.character.json')
+    .then((module) => module.default as unknown as CharacterDefinition)
+    .catch(() => null);
 
-  // Otherwise an authored VRM, if one is present. VRoid exports no animation clips,
-  // but this game generates locomotion from pose tables rather than sampling
-  // them — and VRM guarantees a named humanoid skeleton — so an authored model
-  // walks, runs and carries with no animation data in the file at all.
+  // The courier: the VRoid model (hand-built hair, face and glasses) dressed
+  // as on her character sheet, moving with captured motion. The clips were
+  // recorded for the Meshy heroine's skeleton (docs/26) and are retargeted
+  // onto the VRM's humanoid rig at load (docs/27), mapped through the same
+  // manifest. Without them she still walks on the generated gait.
   try {
     const { VrmCharacter } = await import('@game/entities/VrmCharacter');
-    const vrm = await VrmCharacter.load(`${import.meta.env.BASE_URL}assets/characters/aria.vrm`);
+    const motion = manifest?.clips
+      ? {
+          url: `${base}assets/characters/heroine-motion.glb`,
+          clips: manifest.clips,
+          ...(manifest.fallback ? { fallback: manifest.fallback } : {}),
+        }
+      : undefined;
+    const vrm = await VrmCharacter.load(`${base}assets/characters/aria.vrm`, 'Aria Chen', motion);
     if (vrm) {
       scene.setCharacter(vrm, vrm.height);
       return;
     }
   } catch (error) {
-    console.warn('[Character] VRM unavailable; using the procedural rig', error);
+    console.warn('[Character] VRM unavailable; trying the generated heroine', error);
+  }
+
+  // Otherwise the heroine Meshy generated from the sheet, with the same
+  // clips on her own skeleton.
+  try {
+    if (manifest) {
+      const { loadCharacter } = await import('@engine/character/CharacterFactory');
+      scene.setCharacter(await loadCharacter(manifest, base), manifest.height);
+      return;
+    }
+  } catch (error) {
+    console.warn('[Character] heroine unavailable; using the procedural rig', error);
   }
 
   try {

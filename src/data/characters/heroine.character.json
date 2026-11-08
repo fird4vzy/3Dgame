@@ -42,6 +42,7 @@
   "notes": {
     "source": "Meshy image-to-3D from tools/concepts/heroine-front.png (A-pose), auto-rigged, library animations 243, 1, 14, 466, 552, 44, 290, 415. Tasks: image 01a1bb5c-3151-7501-8deb-dc0284a1f6c7, rig 01a1bb5e-008c-77f0-ab5e-8c2ca3e1d3e9.",
     "rig": "24 joints, Mixamo-style names, centimetre units under an Armature scaled 0.01.",
-    "motion": "Walking_Woman and Run_02 arrive in place; the factory measures their speed from the planted foot (1.26 and 3.85 m/s). Carry_Water_Bucket_Walk (552) was generated but is not a loop — mostly standing with the bucket — so carrying uses the ordinary walk, with the lantern on its spring."
+    "motion": "Walking_Woman and Run_02 arrive in place; the factory measures their speed from the planted foot (1.26 and 3.85 m/s). Carry_Water_Bucket_Walk (552) was generated but is not a loop — mostly standing with the bucket — so carrying uses the ordinary walk, with the lantern on its spring.",
+    "vrm": "The player is aria.vrm; these clips play on her through src/game/entities/retarget.ts, read from heroine-motion.glb (this model without its mesh, only the clips named above: node tools/motion-only.mjs). This model itself is the fallback. See docs/27."
   }
 }

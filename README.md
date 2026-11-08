@@ -60,15 +60,17 @@ is authored in.
   water; MSAA, bloom, AgX and a film grade
 - Authored Japanese village (Meshy image-to-3D); collision with every house,
   trunk, gate post and lantern ([`docs/25`](docs/25-solid-world.md))
-- The heroine, generated from her character sheet, rigged, and moving with
-  captured animation — walk, run, jump, a jump for joy after each delivery
-  ([`docs/26`](docs/26-the-heroine.md)); the older VRM is a fallback
-- 229 unit tests, two browser suites including a full scripted playthrough
+- The courier: the VRoid model (Aria), dressed as on her character sheet,
+  moving with captured animation (walk, run, a jump timed to the real arc, a
+  jump for joy after each delivery) retargeted onto her rig at load
+  ([`docs/27`](docs/27-aria-in-motion.md)). The Meshy model generated from
+  the sheet ([`docs/26`](docs/26-the-heroine.md)) is the fallback
+- 235 unit tests, two browser suites including a full scripted playthrough
 
-Payload today: 0.3 MB gzipped JS, 6.6 MB of models, 2.9 MB for the heroine,
-2.2 MB of audio. Grass, trees, leaf textures, sky and water are all generated
-at load. The 16.5 MB VRM still ships in `public/` but is only fetched if the
-heroine fails to load.
+Payload today: 0.3 MB gzipped JS, 6.6 MB of models, 16.5 MB for the VRM plus
+0.5 MB of captured clips, 2.2 MB of audio. Grass, trees, leaf textures, sky
+and water are all generated at load. The 2.9 MB Meshy heroine is only
+fetched if the VRM fails to load.
 
 Not yet built: composed music, day/night and weather, photo mode.
 Phase 5 in [`docs/13-roadmap.md`](docs/13-roadmap.md).
@@ -81,6 +83,8 @@ Lighting is judged in pictures, not numbers (dev server running):
 node tools/shoot-moods.mjs out/     # 6 views × 3 moods, with frame times
 node tools/shoot-lagoon.mjs out/    # the water and its reflections
 node tools/shoot-world.mjs out/     # the original fixed viewpoints
+node tools/shoot-player.mjs out/    # the courier in the game: back, front, three moods, walk, run, lantern
+node tools/shoot-motion.mjs out/m   # her clips as a contact sheet, with foot slide measured
 ```
 
 ## Regenerating the audio

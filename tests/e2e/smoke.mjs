@@ -134,7 +134,7 @@ console.log('\nwalking');
 await page.keyboard.down('KeyW');
 await page.waitForTimeout(1500);
 const walk = await read();
-check('reaches walk speed (2.2 m/s)', Math.abs(walk.speed - 2.2) < 0.25, `${walk.speed.toFixed(2)} m/s`);
+check('reaches walk speed (1.8 m/s)', Math.abs(walk.speed - 1.8) < 0.25, `${walk.speed.toFixed(2)} m/s`);
 check('reports walking', walk.state === 'walking', walk.state);
 const walkGrounded = await groundedFraction(90);
 check('stays grounded while walking', walkGrounded > 0.95, `${(walkGrounded * 100).toFixed(0)}%`);

@@ -30,15 +30,18 @@ Write shots to the scratchpad directory, not the repo (only `playthrough.png` is
 | How does the world look? (districts, menu) | `node tools/shoot-world.mjs <outDir>` — menu shot + fixed viewpoints, comparable between runs |
 | Does a new/changed .glb look right, right scale? | `node tools/shoot-model.mjs <name> <heightM> <out.png>` — 4 views + 1.65 m human post + tri/material/texture report |
 | Do buildings sit on the ground? | `node tools/probe-grounding.mjs` — worst gap / burial per footprint in metres. Last known good: worst wall gap 0.16 m on the Landing |
-| Player character | `npm run shoot:character` (turnaround + head crop) |
-| Gait / hands / icons | `tools/gait-preview.html`, `tools/hand-preview.html`, `tools/icon-preview.html` via the dev server; `node tools/shoot-gait.mjs` |
+| The courier in the game | `node tools/shoot-player.mjs <outDir>` — from behind and in front in all 3 moods, walking, running, carrying the lantern (standing and side-on). Judge whether the shirt still reads as a shirt from behind under golden light |
+| Her motion, cloth, face | `node tools/shoot-motion.mjs <outDir>/m` — contact sheet (stand ×2, walk, run, jump on the real arc, celebrate), planted-foot ratio per gait (must be ~1.00), close-ups front/back/face. In `tools/motion-preview.html`, `__pick(x, y)` names the mesh, material and UV under a pixel |
+| Procedural rig (fallback) | `npm run shoot:character` (turnaround + head crop) |
+| Gait / hands / icons | `tools/gait-preview.html`, `tools/hand-preview.html`, `tools/icon-preview.html` via the dev server; `node tools/shoot-gait.mjs` (these drive the *generated* gait, which only runs when captured clips are missing) |
 | Movement still works | `npm run test:e2e` |
 | Whole game still completes | `npm run test:play` → writes `playthrough.png` (set `LUMENPOST_SHOT=<path>` to write elsewhere) |
 
 ## Gotchas
 
 - The first page load after starting Vite can take 40+ s (dependency pre-bundling); a timeout on the very first run is not a bug. Retry once.
-- `test:e2e` runs on SwiftShader (CPU). The game detects software GL and drops to the low tier — if e2e suddenly crawls, check that detection (`isSoftwareRenderer` in `engine/platform/Viewport`).
+- `test:e2e` runs on SwiftShader (CPU). The game detects software GL and drops to the low tier — if e2e suddenly crawls, check that detection (`isSoftwareRenderer` in `engine/platform/Viewport`). Even then it runs at 4–8 fps on this machine: a timed walk can end somewhere else, a click can time out, `browser.close()` can hang after every check passed. Re-run before believing a red result.
+- Anything dark hidden in the VRM's textures shows up once the cloth is light. Before blaming a texture, `__pick` the pixel: the black teeth under her top were MToon cut-outs never being applied (docs/27).
 - shoot-moods hides the HUD; with the HUD visible frames cost ~1.3 ms more.
 - The project lives in OneDrive: if files fail to read with `UNKNOWN: unknown error, read` / "cloud file provider is not running", OneDrive is not running and files are cloud-only placeholders. Ask the user before starting it.
 

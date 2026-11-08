@@ -1,5 +1,10 @@
 # 26 — The heroine, from her character sheet
 
+> **Superseded in part by [docs/27](27-aria-in-motion.md).** The generated
+> mesh read as plastic and stood hunched, so the player is the VRoid model
+> again, dressed from the sheet. The clips described here play on her through
+> a retarget. This model is now only the fallback if the VRM fails to load.
+
 The player character was a VRoid model (Aria) walked by a procedural gait.
 Two reports drove the change: she should look like the character sheet the
 user drew from — dark hair to the waist, black glasses, a white shirt with

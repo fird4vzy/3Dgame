@@ -116,9 +116,15 @@ export function createParcel(colour: string): { group: THREE.Group; glow: THREE.
   bail.position.y = -0.07;
   group.add(bail);
 
-  const glow = new THREE.SpotLight(new THREE.Color(colour), 3, 7, Math.PI * 0.36, 0.85, 2);
-  glow.position.copy(core.position);
-  glow.target.position.set(0, -2, 0.25);
+  // The pool of light is cast from a little ahead of the bottle, onto the
+  // path she is walking, in a cone narrow enough to miss her. Cast from the
+  // bottle itself in a wide cone, the leg it hangs beside sat 10 cm from the
+  // source and inverse-square lit it some twenty times brighter than the
+  // sun: light jeans burned to white from the knee down. The ground still
+  // gets a pool about a metre across.
+  const glow = new THREE.SpotLight(new THREE.Color(colour), 3, 7, Math.PI * 0.2, 0.7, 2);
+  glow.position.set(0, core.position.y, 0.2);
+  glow.target.position.set(0, -2, 0.45);
   group.add(glow, glow.target);
 
   return { group, glow, core };

@@ -1,9 +1,18 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm';
-import type { LoadedCharacter, LocomotionSample } from '@engine/character/CharacterFactory';
+import {
+  AIRBORNE_CLIPS,
+  LOOPING_CLIPS,
+  WALKING_CLIPS,
+  type LoadedCharacter,
+  type LocomotionSample,
+} from '@engine/character/CharacterFactory';
 import type { CharacterDefinition, ClipName } from '@engine/character/CharacterDefinition';
+import { ClipResolver } from '@engine/character/ClipResolver';
 import { POSES, CLIP_POSE, type Pose } from './CourierAnimator';
+import { retargetToVrm, type RetargetedClip } from './retarget';
+import { dressFromSheet } from './outfit';
 import {
   airPose,
   armSwing,
@@ -23,6 +32,8 @@ const damp = (a: number, b: number, rate: number, dt: number): number =>
   a + (b - a) * (1 - Math.exp(-rate * dt));
 
 const _delta = new THREE.Quaternion();
+const _target = new THREE.Quaternion();
+const _scale = new THREE.Vector3();
 const _euler = new THREE.Euler();
 const _box = new THREE.Box3();
 const _size = new THREE.Vector3();
@@ -50,6 +61,8 @@ const BONES = [
   'upperChest',
   'neck',
   'head',
+  'leftShoulder',
+  'rightShoulder',
   'leftUpperArm',
   'leftLowerArm',
   'leftHand',
@@ -139,14 +152,50 @@ const PET_ANIM_SECONDS = 1.5;
 /** Rotation that brings a T-posed arm down to the side, about Z. */
 const ARM_DOWN = 1.25;
 
+/** Seconds to cross-fade between captured clips. */
+const FADE = 0.2;
+
+/**
+ * Captured motion for the VRM: a glTF whose skeleton and clips are played on
+ * the normalized rig through `retargetToVrm`, mapped with a character
+ * manifest's clip table.
+ */
+export interface VrmMotion {
+  /** glTF with a Mixamo-style skeleton and its clips. */
+  url: string;
+  /** Canonical clip → clip name in that file. */
+  clips: NonNullable<CharacterDefinition['clips']>;
+  fallback?: CharacterDefinition['fallback'];
+}
+
+/**
+ * Captured motion, once retargeted.
+ *
+ * When present it owns the skeleton for everything a performer was recorded
+ * doing. The procedural rig keeps what no clip covers: the fingers (the
+ * source skeleton has none), the face, the gaze, and the crouch to pet a cat.
+ */
+interface Captured {
+  readonly mixer: THREE.AnimationMixer;
+  readonly clips: Map<string, RetargetedClip>;
+  readonly resolver: ClipResolver;
+  /** The jump, played in parts around the controller's real arc. */
+  readonly jump: { action: THREE.AnimationAction; takeoff: number; touchdown: number } | null;
+  action: THREE.AnimationAction | null;
+  source: string;
+  role: ClipName;
+}
+
 export class VrmCharacter implements LoadedCharacter {
-  readonly definition: CharacterDefinition;
+  definition: CharacterDefinition;
   readonly object3D: THREE.Object3D;
 
   private readonly vrm: VRM;
   private readonly bones = new Map<BoneName, THREE.Object3D>();
   private readonly rest = new Map<BoneName, THREE.Quaternion>();
   private readonly baseColours = new Map<THREE.Material, THREE.Color>();
+  /** Captured clips, if any were attached; otherwise the gait is generated. */
+  private captured: Captured | null = null;
 
   private clip: ClipName = 'idle';
   private pose: Pose = POSES.idle!;
@@ -291,7 +340,7 @@ export class VrmCharacter implements LoadedCharacter {
     };
   }
 
-  static async load(url: string, displayName = 'Aria Chen'): Promise<VrmCharacter | null> {
+  static async load(url: string, displayName = 'Aria Chen', motion?: VrmMotion): Promise<VrmCharacter | null> {
     try {
       const loader = new GLTFLoader();
       loader.register((parser) => new VRMLoaderPlugin(parser));
@@ -319,22 +368,89 @@ export class VrmCharacter implements LoadedCharacter {
         mesh.frustumCulled = false;
       });
 
+      // Dressed as on her character sheet: a white shirt with lavender
+      // pinstripes and light jeans, painted over the model's own textures.
+      dressFromSheet(vrm.scene);
+
       _box.setFromObject(vrm.scene);
       _box.getSize(_size);
 
-      return new VrmCharacter(vrm, displayName, _size.y || 1.65);
+      const character = new VrmCharacter(vrm, displayName, _size.y || 1.65);
+      if (motion) await character.attachMotion(motion);
+      return character;
     } catch (error) {
       console.warn(`[VRM] could not load ${url}`, error);
       return null;
     }
   }
 
+  /**
+   * Play captured clips instead of the generated gait.
+   *
+   * The clips come from another skeleton (Meshy's, recorded performers) and
+   * are retargeted once, here, onto the normalized rig. If anything about
+   * that fails she keeps the procedural gait, which is complete on its own.
+   */
+  private async attachMotion(motion: VrmMotion): Promise<void> {
+    try {
+      const gltf = await new GLTFLoader().loadAsync(motion.url);
+      const role = new Map<string, ClipName>();
+      for (const [ours, theirs] of Object.entries(motion.clips)) {
+        if (theirs && !role.has(theirs)) role.set(theirs, ours as ClipName);
+      }
+      const named = (set: ReadonlySet<ClipName>): Set<string> =>
+        new Set([...role].filter(([, clip]) => set.has(clip)).map(([name]) => name));
+
+      const clips = retargetToVrm(gltf.scene, gltf.animations, this.vrm, {
+        gaits: named(WALKING_CLIPS),
+        airborne: named(AIRBORNE_CLIPS),
+      });
+      if (clips.size === 0) return;
+
+      this.definition = {
+        ...this.definition,
+        clips: motion.clips,
+        ...(motion.fallback ? { fallback: motion.fallback } : {}),
+        notes: {
+          ...this.definition.notes,
+          animation: `Captured clips from ${motion.url}, retargeted onto the normalized rig; fingers, face and gaze generated.`,
+        },
+      };
+      const mixer = new THREE.AnimationMixer(this.vrm.scene);
+      const jumpName = motion.clips.jump_start;
+      const jumpClip = jumpName ? clips.get(jumpName) : undefined;
+      this.captured = {
+        mixer,
+        clips,
+        resolver: new ClipResolver(this.definition, new Set(clips.keys())),
+        jump: jumpClip?.flight ? { action: mixer.clipAction(jumpClip.clip), ...jumpClip.flight } : null,
+        action: null,
+        source: '',
+        role: 'idle',
+      };
+      this.playCaptured(this.captured, this.clip, true);
+    } catch (error) {
+      console.warn('[VRM] captured motion unavailable; using the generated gait', error);
+      this.captured = null;
+    }
+  }
+
+  /** True when captured clips drive the body. */
+  get usesCapturedMotion(): boolean {
+    return this.captured !== null;
+  }
+
+  /** A retargeted clip by its source name, for tooling. */
+  capturedClip(name: string): RetargetedClip | undefined {
+    return this.captured?.clips.get(name);
+  }
+
   get height(): number {
     return this.definition.height;
   }
 
-  play(clip: ClipName): void {
-    if (this.clip === clip) return;
+  play(clip: ClipName, restart = false): void {
+    if (this.clip === clip && !restart) return;
     this.clip = clip;
     this.clipTime = 0;
     this.carrying = clip.startsWith('carry') || clip === 'handoff';
@@ -350,6 +466,72 @@ export class VrmCharacter implements LoadedCharacter {
     if (clip === 'land') this.setExpression('relaxed', 0.5);
     if (clip === 'celebrate' || clip === 'emote_cheer') this.setExpression('happy', 2.2);
     if (clip === 'handoff') this.setExpression('happy', 1.6);
+
+    if (this.captured) this.playCaptured(this.captured, clip, restart);
+  }
+
+  /**
+   * Choose the captured clip for a canonical one.
+   *
+   * The jump is played in parts around the controller's arc, because the
+   * controller does the real jump and its airtime is never the clip's: from
+   * take-off (not the crouch before it — she is already rising), held just
+   * before touchdown for as long as she stays up, and resumed from touchdown
+   * when she lands, so the absorb happens when her feet actually meet the
+   * ground. Stepping off a ledge joins the same clip on the way down.
+   */
+  private playCaptured(motion: Captured, clip: ClipName, restart: boolean): void {
+    const jump = motion.jump;
+    if (jump && (clip === 'jump_start' || clip === 'fall' || clip === 'land')) {
+      const inAir =
+        motion.action === jump.action && (motion.role === 'jump_start' || motion.role === 'fall');
+      if (clip === 'land') {
+        if (!inAir) {
+          this.playResolved(motion, 'land', false);
+          return;
+        }
+        jump.action.paused = false;
+        jump.action.time = Math.max(jump.action.time, jump.touchdown);
+      } else if (!inAir || (restart && clip === 'jump_start')) {
+        const takeoff = clip === 'jump_start';
+        const from = takeoff ? Math.max(0, jump.takeoff - 0.08) : Math.max(0, jump.touchdown - 0.3);
+        this.fadeTo(motion, jump.action, from, false, takeoff ? 0.1 : FADE);
+      }
+      motion.source = jump.action.getClip().name;
+      motion.role = clip;
+      return;
+    }
+    this.playResolved(motion, clip, restart);
+  }
+
+  private playResolved(motion: Captured, clip: ClipName, restart: boolean): void {
+    const resolved = motion.resolver.resolve(clip);
+    const entry = resolved ? motion.clips.get(resolved.sourceName) : undefined;
+    if (!resolved || !entry) return;
+    const action = motion.mixer.clipAction(entry.clip);
+    if (action !== motion.action || restart) {
+      this.fadeTo(motion, action, 0, LOOPING_CLIPS.has(resolved.via), FADE);
+    }
+    motion.source = resolved.sourceName;
+    motion.role = resolved.via;
+  }
+
+  private fadeTo(
+    motion: Captured,
+    action: THREE.AnimationAction,
+    from: number,
+    loops: boolean,
+    fade: number,
+  ): void {
+    action.reset();
+    action.setLoop(loops ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+    action.clampWhenFinished = !loops;
+    action.timeScale = 1;
+    action.time = from;
+    action.play();
+    const previous = motion.action;
+    if (previous && previous !== action) previous.crossFadeTo(action, fade, false);
+    motion.action = action;
   }
 
   /** Trigger a facial expression for `hold` seconds. */
@@ -365,7 +547,70 @@ export class VrmCharacter implements LoadedCharacter {
 
   update(dt: number): void {
     this.clipTime += dt;
+    this.lastDt = dt;
 
+    if (this.captured) this.updateCaptured(dt, this.captured);
+    else this.updateGenerated(dt);
+
+    this.posePetting(dt);
+    this.updateFace(dt);
+
+    // Everything the VRM needs, **except** springbones.
+    //
+    // Springbone physics assumes a world with one fixed "down" and a character
+    // whose root does not rotate much. This game breaks both: down is toward
+    // the planet centre and changes continuously, and the root is re-oriented
+    // to the surface normal every frame. The simulation reads that as violent
+    // motion and answers by flinging every hair strand outward into a spiked
+    // crown. Re-pointing gravity per joint and giving them a `center` improved
+    // it but did not fix it.
+    //
+    // So the hair sits in its authored rest pose instead. Static hair that
+    // hangs correctly beats dynamic hair that looks broken, and this is the
+    // honest trade until the springbone solver can be run in the character's
+    // local frame properly.
+    this.vrm.humanoid?.update();
+    this.vrm.expressionManager?.update();
+    this.vrm.lookAt?.update(dt);
+    // MToon copies its alpha cutoff into the shader only here. Skipping it
+    // (with the rest of `vrm.update`) left every cut-out drawn: the clipped
+    // edges of the top rendered black below its hem and round the armholes,
+    // invisible on a navy top and glaring on a white one.
+    for (const material of this.vrm.materials ?? []) {
+      (material as THREE.Material & { update?: (delta: number) => void }).update?.(dt);
+    }
+  }
+
+  /**
+   * Captured clips drive the body.
+   *
+   * Walks and runs play at the rate the body is actually covering ground, so
+   * the planted foot stays planted (each clip's own speed was measured from
+   * its feet, see `retarget.ts`). The jump holds its reach for the ground for
+   * as long as the real arc lasts.
+   */
+  private updateCaptured(dt: number, motion: Captured): void {
+    const m = this.motion;
+    this.speed = damp(this.speed, m.grounded ? m.speed : 0, 9, dt);
+    const action = motion.action;
+
+    const native = WALKING_CLIPS.has(motion.role) ? motion.clips.get(motion.source)?.groundSpeed : undefined;
+    if (action && native) {
+      const scale = this.object3D.getWorldScale(_scale).x || 1;
+      action.timeScale = THREE.MathUtils.clamp(this.speed / (native * scale), 0.55, 1.9);
+    }
+
+    const jump = motion.jump;
+    if (jump && action === jump.action && motion.role !== 'land') {
+      action.paused = !m.grounded && action.time >= jump.touchdown - 0.06;
+    }
+
+    motion.mixer.update(dt);
+    this.poseFingers(Math.min(1, this.speed / 4.6));
+  }
+
+  /** The generated gait: legs, arms, spine and pelvis from measured motion. */
+  private updateGenerated(dt: number): void {
     const rate = 9;
     const c = this.current;
     const p = this.pose;
@@ -436,26 +681,6 @@ export class VrmCharacter implements LoadedCharacter {
     this.poseArms(armAmp * this.effort, c);
     this.poseSpine(c, this.effort);
     this.poseLanding();
-    this.posePetting(dt);
-    this.updateFace(dt);
-
-    // Everything the VRM needs, **except** springbones.
-    //
-    // Springbone physics assumes a world with one fixed "down" and a character
-    // whose root does not rotate much. This game breaks both: down is toward
-    // the planet centre and changes continuously, and the root is re-oriented
-    // to the surface normal every frame. The simulation reads that as violent
-    // motion and answers by flinging every hair strand outward into a spiked
-    // crown. Re-pointing gravity per joint and giving them a `center` improved
-    // it but did not fix it.
-    //
-    // So the hair sits in its authored rest pose instead. Static hair that
-    // hangs correctly beats dynamic hair that looks broken, and this is the
-    // honest trade until the springbone solver can be run in the character's
-    // local frame properly.
-    this.vrm.humanoid?.update();
-    this.vrm.expressionManager?.update();
-    this.vrm.lookAt?.update(dt);
   }
 
   /**
@@ -589,7 +814,14 @@ export class VrmCharacter implements LoadedCharacter {
     arm('left', 0, 1);
     arm('right', 0.5, -1);
 
-    this.poseHands(run);
+    this.poseFingers(run);
+
+    // Carrying: the right arm comes forward and up to cradle the parcel.
+    if (this.carrying) {
+      this.rotate('rightUpperArm', S * -1.0, 0, -ARM_DOWN * 0.72);
+      this.rotate('rightLowerArm', S * -0.95, 0, 0);
+      this.rotate('rightHand', S * -0.2, 0, 0);
+    }
   }
 
   /**
@@ -608,7 +840,7 @@ export class VrmCharacter implements LoadedCharacter {
    * inherit the arm's rotated frame, where local X runs along the limb. See
    * the note in `poseArms`.
    */
-  private poseHands(run: number): void {
+  private poseFingers(run: number): void {
     // A little life even at a standstill, so they are never perfectly still.
     const breathe = Math.sin(this.clipTime * 1.1) * 0.02;
 
@@ -650,13 +882,6 @@ export class VrmCharacter implements LoadedCharacter {
       this.rotate(`${side}ThumbMetacarpal` as BoneName, 0, 0, -sign * (0.25 + thumb * 0.4));
       this.rotate(`${side}ThumbProximal` as BoneName, 0, sign * thumb * 0.7, 0);
       this.rotate(`${side}ThumbDistal` as BoneName, 0, sign * thumb * 0.6, 0);
-    }
-
-    // Carrying: the right arm comes forward and up to cradle the parcel.
-    if (this.carrying) {
-      this.rotate('rightUpperArm', S * -1.0, 0, -ARM_DOWN * 0.72);
-      this.rotate('rightLowerArm', S * -0.95, 0, 0);
-      this.rotate('rightHand', S * -0.2, 0, 0);
     }
   }
 
@@ -708,6 +933,8 @@ export class VrmCharacter implements LoadedCharacter {
       this.hipRestY - this.hipSink * (1 - this.airborne) + c.bob * Math.max(0, 1 - gaitWeight);
     // Lateral weight shift toward the standing leg.
     hips.position.x = this.hipRestX + shift * 0.026 * gaitWeight;
+    // Only the crouch moves the pelvis fore and aft, and it blends from here.
+    hips.position.z = this.hipRestZ;
   }
 
   /**
@@ -781,30 +1008,35 @@ export class VrmCharacter implements LoadedCharacter {
           ? 1
           : Math.cos(((t - 0.7) / 0.3) * Math.PI * 0.5);
 
-    const knee = 1.15 * weight;
-    const thigh = 0.95 * weight;
+    // The full crouch, blended in by `weight` from whatever the body was
+    // already doing — the generated gait or a captured idle alike.
+    const w = weight;
+    const knee = 1.15;
+    const thigh = 0.95;
     const chain = HIP * thigh + S * knee;
 
     for (const side of ['left', 'right'] as const) {
-      this.rotate(`${side}UpperLeg` as BoneName, HIP * thigh, 0, 0);
-      this.rotate(`${side}LowerLeg` as BoneName, S * knee, 0, 0);
+      this.blend(`${side}UpperLeg` as BoneName, HIP * thigh, 0, 0, w);
+      this.blend(`${side}LowerLeg` as BoneName, S * knee, 0, 0, w);
       // Sole stays flat: she is crouching, not standing on her toes.
-      this.rotate(`${side}Foot` as BoneName, -chain, 0, 0);
+      this.blend(`${side}Foot` as BoneName, -chain, 0, 0, w);
     }
 
     const hips = this.bones.get('hips');
     if (hips) {
       // Down, and back over the heels — a crouch that only goes down looks
       // like the floor moved.
-      hips.position.y = this.hipRestY - 0.42 * weight;
-      hips.position.z = this.hipRestZ - 0.12 * weight;
+      hips.position.y += (this.hipRestY - 0.42 - hips.position.y) * w;
+      hips.position.z += (this.hipRestZ - 0.12 - hips.position.z) * w;
     }
 
-    this.rotate('spine', S * 0.45 * weight, 0, 0);
-    this.rotate('chest', S * 0.22 * weight, 0, 0);
+    this.blend('hips', 0, 0, 0, w);
+    this.blend('spine', S * 0.45, 0, 0, w);
+    this.blend('chest', S * 0.22, 0, 0, w);
+    this.blend('upperChest', 0, 0, 0, w);
     // Head stays down on the cat rather than following the spine's fold, which
     // is what makes her look *at* it.
-    this.rotate('neck', S * 0.3 * weight, 0, 0);
+    this.blend('neck', S * 0.3, 0, 0, w);
 
     // The reaching arm. Forward and down, elbow softened.
     //
@@ -820,15 +1052,31 @@ export class VrmCharacter implements LoadedCharacter {
     // is what turned the reach into a straight horizontal pole. Reaching is
     // pitch's job; `out` only ever decides how far from the ribs the arm hangs.
     // A hand reaching down to an animal comes forward and *in*, not out.
-    const reach = ARM_DOWN + 0.12 + 0.2 * weight;
-    this.rotate('rightUpperArm', S * -0.72 * weight, 0, -reach);
+    const reach = ARM_DOWN + 0.12 + 0.2;
+    this.blend('rightShoulder', 0, 0, 0, w);
+    this.blend('rightUpperArm', S * -0.72, 0, -reach, w);
     // A real reach keeps a bend. A straight arm is a signpost.
-    this.rotate('rightLowerArm', 0, RIGHT * -0.75 * weight, 0);
-    this.rotate('rightHand', 0, RIGHT * -0.35 * weight, 0);
+    this.blend('rightLowerArm', 0, RIGHT * -0.75, 0, w);
+    this.blend('rightHand', 0, RIGHT * -0.35, 0, w);
 
     // The other arm rests on the knee.
-    this.rotate('leftUpperArm', S * -0.35 * weight, 0, ARM_DOWN + 0.12 + 0.15 * weight);
-    this.rotate('leftLowerArm', 0, LEFT * -0.9 * weight, 0);
+    this.blend('leftShoulder', 0, 0, 0, w);
+    this.blend('leftUpperArm', S * -0.35, 0, ARM_DOWN + 0.12 + 0.15, w);
+    this.blend('leftLowerArm', 0, LEFT * -0.9, 0, w);
+    this.blend('leftHand', 0, 0, 0, w);
+  }
+
+  /**
+   * Turn a bone toward a pose (a rotation against its rest, as `rotate`
+   * takes) by `weight`, from wherever it is now.
+   */
+  private blend(name: BoneName, x: number, y: number, z: number, weight: number): void {
+    const bone = this.bones.get(name);
+    const rest = this.rest.get(name);
+    if (!bone || !rest) return;
+    _euler.set(x, y, z, 'XYZ');
+    _target.copy(rest).multiply(_delta.setFromEuler(_euler));
+    bone.quaternion.slerp(_target, weight);
   }
 
   /** Crouch down and reach out. Called when the player pets something. */

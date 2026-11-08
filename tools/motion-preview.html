@@ -1,0 +1,210 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Motion contact sheet</title>
+    <style>
+      body { margin: 0; background: #0d1020; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      /**
+       * The player as the game drives her: Aria (VRM), dressed from the
+       * character sheet, moving with captured clips retargeted onto her rig.
+       *
+       * Rows, top to bottom: standing (front, side), walk, run, a jump across
+       * the controller's real arc, and the celebration. Driven with synthetic
+       * `LocomotionSample`s, so two runs are identical. `__motionMeasure`
+       * reports how far a planted foot slides at a given speed — the thing a
+       * still image cannot show.
+       *
+       * Usage: npm run dev, then node tools/shoot-motion.mjs [prefix]
+       */
+      import * as THREE from 'three';
+      import { VrmCharacter } from '/src/game/entities/VrmCharacter.ts';
+      import manifest from '/src/data/characters/heroine.character.json';
+
+      const COLS = 8;
+      const CELL_W = 180;
+      const CELL_H = 300;
+      const WALK = 1.8;
+      const RUN = 4.6;
+      const JUMP = 6.6;
+      const GRAVITY = 18;
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(1);
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color('#8fa3b8');
+      scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x6b6250, 1.6));
+      const key = new THREE.DirectionalLight(0xfff0dc, 2.4);
+      key.position.set(3, 6, 5);
+      scene.add(key);
+      const grid = new THREE.GridHelper(6, 24, 0x3f4f6e, 0x5d6d8a);
+      scene.add(grid);
+
+      const camera = new THREE.PerspectiveCamera(24, CELL_W / CELL_H, 0.1, 100);
+
+      const character = await VrmCharacter.load('/assets/characters/aria.vrm', 'Aria Chen', {
+        url: '/assets/characters/heroine-motion.glb',
+        clips: manifest.clips,
+        fallback: manifest.fallback,
+      });
+      if (!character) throw new Error('aria.vrm did not load');
+      scene.add(character.object3D);
+
+      const _v = new THREE.Vector3();
+      const sample = (speed, verticalSpeed = 0, grounded = true) => ({ speed, verticalSpeed, grounded, turnRate: 0 });
+      function step(s, dt) {
+        character.setLocomotion(s);
+        character.update(dt);
+      }
+      function settle(clip, s, seconds = 1.5) {
+        character.play(clip);
+        for (let t = 0; t < seconds; t += 1 / 60) step(s, 1 / 60);
+      }
+      const front = () => { camera.position.set(0, 0.95, 4.2); camera.lookAt(0, 0.85, 0); };
+      const side = () => { camera.position.set(4.2, 0.95, 0); camera.lookAt(0, 0.85, 0); };
+
+      const ROWS = 6;
+      renderer.setSize(CELL_W * COLS, CELL_H * ROWS);
+      renderer.setScissorTest(true);
+      let rowIndex = 0;
+      function draw(col) {
+        const y = (ROWS - 1 - rowIndex) * CELL_H;
+        renderer.setViewport(col * CELL_W, y, CELL_W, CELL_H);
+        renderer.setScissor(col * CELL_W, y, CELL_W, CELL_H);
+        renderer.render(scene, camera);
+      }
+      function row(view, frames) {
+        view();
+        frames.forEach((advance, col) => { advance(); draw(col); });
+        rowIndex++;
+      }
+      const every = (dt, s) => Array.from({ length: COLS }, () => () => step(s, dt));
+
+      // Standing, front and side, half a second apart.
+      settle('idle', sample(0));
+      row(front, every(0.5, sample(0)));
+      settle('idle', sample(0));
+      row(side, every(0.5, sample(0)));
+
+      // Walk and run, one cycle across the row (the clip's length at the rate it plays).
+      const cycle = (clip, speed) => {
+        const c = character.definition.clips[clip];
+        return c ? window.__clipInfo(c).duration / window.__rate(speed, c) : 1;
+      };
+      window.__clipInfo = (name) => ({ duration: character.capturedClip(name)?.clip.duration ?? 1 });
+      window.__rate = (speed, name) => {
+        const native = character.capturedClip(name)?.groundSpeed ?? speed;
+        return Math.min(1.9, Math.max(0.55, speed / native));
+      };
+      settle('walk', sample(WALK));
+      row(side, every(cycle('walk', WALK) / COLS, sample(WALK)));
+      settle('run', sample(RUN));
+      row(side, every(cycle('run', RUN) / COLS, sample(RUN)));
+
+      // A jump on the controller's arc: take-off, rise, apex, fall, land, recover.
+      settle('idle', sample(0));
+      const airtime = (2 * JUMP) / GRAVITY;
+      const jumpFrames = [];
+      let t = 0;
+      character.play('jump_start');
+      for (let col = 0; col < COLS; col++) {
+        jumpFrames.push(() => {
+          const target = col < 6 ? (airtime * (col + 0.5)) / 6 : airtime + (col - 5) * 0.12;
+          while (t < target) {
+            const v = JUMP - GRAVITY * t;
+            const inAir = t < airtime;
+            character.play(inAir ? (v > 0 ? 'jump_start' : 'fall') : 'land');
+            step(sample(0, inAir ? v : 0, !inAir), 1 / 60);
+            t += 1 / 60;
+          }
+        });
+      }
+      row(side, jumpFrames);
+
+      // The jump for joy after a delivery.
+      settle('idle', sample(0));
+      character.play('celebrate', true);
+      row(front, every(0.3, sample(0)));
+
+      /**
+       * Planted-foot slide at `speed`: through stance a foot on the ground
+       * must move backward through her frame at the body's speed. Returns the
+       * mean planted speed and its ratio to the body's.
+       */
+      window.__motionMeasure = (clip, speed, samples = 96) => {
+        settle(clip, sample(speed), 2);
+        const name = character.definition.clips[clip];
+        const duration = character.capturedClip(name).clip.duration / window.__rate(speed, name);
+        const dt = duration / samples;
+        const feet = ['leftFoot', 'rightFoot'].map((n) => character.getBone(n));
+        const track = feet.map(() => []);
+        for (let i = 0; i <= samples; i++) {
+          step(sample(speed), dt);
+          character.object3D.updateWorldMatrix(true, true);
+          feet.forEach((f, k) => track[k].push(f.getWorldPosition(_v).clone()));
+        }
+        let sum = 0;
+        let count = 0;
+        for (const points of track) {
+          const low = Math.min(...points.map((p) => p.y));
+          const high = Math.max(...points.map((p) => p.y));
+          for (let i = 1; i < points.length; i++) {
+            const a = points[i - 1];
+            const b = points[i];
+            if (a.y > low + (high - low) * 0.12 || b.y > low + (high - low) * 0.12) continue;
+            sum += -(b.z - a.z) / dt;
+            count++;
+          }
+        }
+        const planted = count ? sum / count : 0;
+        return {
+          clip: name,
+          speed,
+          native: +character.capturedClip(name).groundSpeed.toFixed(3),
+          rate: +window.__rate(speed, name).toFixed(3),
+          cadence: Math.round((2 * 60) / duration),
+          planted: +planted.toFixed(3),
+          ratio: +(planted / speed).toFixed(3),
+        };
+      };
+      /** One large frame of her standing, for judging cloth and face. */
+      window.__closeUp = (angle = 0, height = 1.05, distance = 1.6) => {
+        settle('idle', sample(0), 0.5);
+        renderer.setScissorTest(false);
+        renderer.setSize(900, 900);
+        renderer.setViewport(0, 0, 900, 900);
+        camera.aspect = 1;
+        camera.position.set(Math.sin(angle) * distance, height, Math.cos(angle) * distance);
+        camera.lookAt(0, height, 0);
+        camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+      };
+      /** What is drawn at canvas pixel (x, y): mesh, material, UV, face normal. */
+      window.__pick = (x, y) => {
+        const size = renderer.getSize(new THREE.Vector2());
+        const ray = new THREE.Raycaster();
+        ray.setFromCamera(new THREE.Vector2((x / size.x) * 2 - 1, -(y / size.y) * 2 + 1), camera);
+        character.object3D.updateWorldMatrix(true, true);
+        return ray.intersectObject(character.object3D, true).slice(0, 3).map((hit) => {
+          const materials = Array.isArray(hit.object.material) ? hit.object.material : [hit.object.material];
+          return {
+            mesh: hit.object.name,
+            material: materials[hit.face.materialIndex]?.name,
+            uv: hit.uv ? [+hit.uv.x.toFixed(4), +hit.uv.y.toFixed(4)] : null,
+            distance: +hit.distance.toFixed(4),
+            face: hit.faceIndex,
+          };
+        });
+      };
+      window.__character = character;
+      window.__motionReady = true;
+    </script>
+  </body>
+</html>

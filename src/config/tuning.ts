@@ -7,7 +7,12 @@
  */
 export const tuning = {
   move: {
-    walkSpeed: 2.2,
+    /**
+     * The captured walk covers 1.41 m/s per cycle on her legs; at 1.8 it plays
+     * at x1.27, a brisk 158 steps a minute. At the old 2.2 it had to play at
+     * x1.56, 193 steps a minute, which reads as scurrying. See docs/27.
+     */
+    walkSpeed: 1.8,
     runSpeed: 4.6,
     groundAccel: 26,
     groundFriction: 14,

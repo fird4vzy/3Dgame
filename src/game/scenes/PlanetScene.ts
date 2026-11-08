@@ -709,8 +709,10 @@ export class PlanetScene implements IScene {
       // The Coil and Tidebreak keep their procedural pipes and boardwalks:
       // those are the silhouettes that tell you which district you are in, and
       // replacing them with houses would flatten five places into one.
+      // No minka: the generator fused a dead tree into its side and hung an
+      // annex off it, and from the crest of a hill it read as a house
+      // floating with a tree growing through it (docs/27).
       const HOUSES: Array<[string, number]> = [
-        ['minka', 4.6],
         ['machiya', 4.2],
         ['noren', 3.4],
         ['shrine', 3.8],

@@ -111,11 +111,11 @@ class SpriteCharacter implements LoadedCharacter {
 }
 
 /** Canonical clips that loop; everything else plays once and holds its last pose. */
-const LOOPING = new Set<ClipName>(['idle', 'idle_look', 'walk', 'run', 'glide', 'carry_idle', 'carry_walk', 'carry_run', 'sit', 'fall']);
+export const LOOPING_CLIPS: ReadonlySet<ClipName> = new Set<ClipName>(['idle', 'idle_look', 'walk', 'run', 'glide', 'carry_idle', 'carry_walk', 'carry_run', 'sit', 'fall']);
 /** Clips whose own rise must not stack on the controller's real jump. */
-const AIRBORNE = new Set<ClipName>(['jump_start', 'fall', 'land']);
+export const AIRBORNE_CLIPS: ReadonlySet<ClipName> = new Set<ClipName>(['jump_start', 'fall', 'land']);
 /** Clips whose playback rate follows ground speed. */
-const WALKING = new Set<ClipName>(['walk', 'run', 'carry_walk', 'carry_run']);
+export const WALKING_CLIPS: ReadonlySet<ClipName> = new Set<ClipName>(['walk', 'run', 'carry_walk', 'carry_run']);
 
 const _scale = new THREE.Vector3();
 
@@ -182,12 +182,12 @@ class MeshCharacter implements LoadedCharacter {
       this.clips.set(clip.name, clip);
       if (this.hips) {
         const role = roles.get(clip.name);
-        prepareClip(clip, this.hips.name, role !== undefined && AIRBORNE.has(role));
+        prepareClip(clip, this.hips.name, role !== undefined && AIRBORNE_CLIPS.has(role));
         // Speed from the planted foot, always: clips delivered in place have
         // no travel to measure, and a clip that did travel is in place by now.
         // (The hips' drift is no guide either way — a run's half-centimetre of
         // wobble per loop once read as its speed and played it flat out.)
-        if (role !== undefined && WALKING.has(role)) {
+        if (role !== undefined && WALKING_CLIPS.has(role)) {
           const speed = this.measureStance(clip);
           if (speed > 0) this.nativeSpeed.set(clip.name, speed);
         }
@@ -256,7 +256,7 @@ class MeshCharacter implements LoadedCharacter {
     const next = this.mixer.clipAction(animation);
     if (next === this.current && !restart) return;
 
-    const loops = LOOPING.has(resolved.via);
+    const loops = LOOPING_CLIPS.has(resolved.via);
     next.setLoop(loops ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
     next.clampWhenFinished = !loops;
     next.timeScale = 1;
@@ -278,7 +278,7 @@ class MeshCharacter implements LoadedCharacter {
     // Walk and run clips play at the speed the body is actually moving, so
     // the feet stay planted: a clip recorded at 1.3 m/s and played under a
     // body doing 2.2 m/s would otherwise slide every stance.
-    const native = WALKING.has(this.currentRole) ? this.nativeSpeed.get(this.currentSource) : undefined;
+    const native = WALKING_CLIPS.has(this.currentRole) ? this.nativeSpeed.get(this.currentSource) : undefined;
     if (this.current && native && this.hips?.parent) {
       const worldNative = native * this.hips.parent.getWorldScale(_scale).x;
       this.current.timeScale = THREE.MathUtils.clamp(this.speed / worldNative, 0.55, 1.9);

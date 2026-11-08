@@ -84,8 +84,8 @@ and view (`shoot-moods`). The HUD adds ~1.3 ms. Tier scaling: grass density
   but normal maps would lift them.
 - Day/night and weather (the reference's other two moods) are not built.
   Night with lanterns lit would suit the dormant planet well.
-- (Since replaced: the player is now a physically shaded model, docs/26.)
-  The VRM player is MToon-shaded (anime); she reads fine against the valley
-  but does not receive the atmosphere's sun glow.
+- The VRM player is MToon-shaded (anime); she reads fine against the valley
+  but does not receive the atmosphere's sun glow. (She was briefly a
+  physically shaded Meshy model, docs/26; the VRM is back since docs/27.)
 - 32 street-lamp point lights are evaluated in every lit fragment even when
   off. If the frame ever gets tight on mobile, that is the first place to cut.
