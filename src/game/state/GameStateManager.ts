@@ -59,6 +59,9 @@ const table: Transition<GameState, GameEvent, Context>[] = [
   { from: 'cinematic', event: 'cinematicEnd', to: 'playing' },
 
   { from: 'playing', event: 'finalDelivery', to: 'complete' },
+  // "Keep exploring" from the route report: the planet is lit, the run is
+  // over, and the shards are still out there.
+  { from: 'complete', event: 'resume', to: 'playing' },
 ];
 
 export class GameStateManager {

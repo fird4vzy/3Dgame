@@ -653,6 +653,8 @@ export function plantTrees(
       mesh.frustumCulled = false;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      // Static: only the copies over the horizon are drawn (HorizonInstances).
+      mesh.userData.horizonCull = true;
     }
     if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
     meshes.push(trunks, crowns);

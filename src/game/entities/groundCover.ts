@@ -41,6 +41,8 @@ function scatter(
   // shadow pass cost for detail nobody would notice.
   mesh.castShadow = false;
   mesh.receiveShadow = true;
+  // Static: only the copies over the horizon are drawn (HorizonInstances).
+  mesh.userData.horizonCull = true;
 
   const rng = makeRng(seed);
   positions.forEach((position, index) => {

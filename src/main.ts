@@ -1,7 +1,7 @@
 import { EventBus } from '@core/events/EventBus';
 import { ServiceContainer, createToken } from '@core/di/ServiceContainer';
 import { GameLoop } from '@engine/loop/GameLoop';
-import { Viewport } from '@engine/platform/Viewport';
+import { Viewport, type QualityTier } from '@engine/platform/Viewport';
 import { RendererService } from '@engine/render/RendererService';
 import { InputManager } from '@engine/input/InputManager';
 import { AudioManager } from '@engine/audio/AudioManager';
@@ -77,7 +77,9 @@ async function bootstrap(): Promise<void> {
   container.registerValue(Tokens.save, save);
   container.registerValue(Tokens.settings, settings);
 
-  const viewport = new Viewport(bus);
+  // `?quality=low|medium|high` in the address wins, then a saved choice, then
+  // the guess from the hardware.
+  const viewport = new Viewport(bus, chosenQuality(settings.get().qualityTier));
   viewport.attach();
   container.registerValue(Tokens.viewport, viewport);
   setProgress(0.2, t('loading.shaping'));
@@ -127,7 +129,7 @@ async function bootstrap(): Promise<void> {
 
   const hud = new Hud(ui.hud, bus);
   const dialogueOverlay = new DialogueOverlay(ui.hud, bus);
-  wireGameplay(bus, ui, scene, save, hud);
+  wireGameplay(bus, ui, scene, save, hud, state);
   setProgress(1, t('loading.ready'));
 
   state.send('assetsReady');
@@ -438,6 +440,7 @@ function wireGameplay(
   scene: PlanetScene,
   save: SaveManager,
   hud: Hud,
+  state: GameStateManager,
 ): void {
   bus.on('ui:requestDialogueAdvance', () => scene.dialogue.advance());
 
@@ -476,6 +479,15 @@ function wireGameplay(
       if (best === null || seconds < best) draft.stats.bestRunSeconds = seconds;
     });
 
+    // The report is a modal, like the pause menu: the run is `complete`, which
+    // draws the world but does not simulate it. It used to stay `playing`, and
+    // that is why its button never worked: input was still live, so pressing
+    // the mouse on "Keep exploring" took the pointer lock for mouse look, and
+    // the click went to the canvas instead of the button. Pausing the scene
+    // turns input off and lets the pointer go; resuming (wirePauseFlow) takes
+    // `complete` back to `playing` and closes the report.
+    state.send('finalDelivery');
+    scene.setPaused(true);
     hud.setVisible(false);
     ui.push(
       new RouteReportScreen(bus, {
@@ -490,6 +502,13 @@ function wireGameplay(
   });
 
   // "Keep exploring" from the report simply closes it — the lit planet is
-  // still there, and the shards are still worth hunting.
+  // still there, and the shards are still worth hunting. The pause flow's
+  // resume does the closing; this brings the HUD back.
   bus.on('ui:requestResume', () => hud.setVisible(true));
+}
+
+function chosenQuality(saved: 'auto' | QualityTier): QualityTier | undefined {
+  const asked = new URLSearchParams(window.location.search).get('quality');
+  if (asked === 'low' || asked === 'medium' || asked === 'high') return asked;
+  return saved === 'auto' ? undefined : saved;
 }

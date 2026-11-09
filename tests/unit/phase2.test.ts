@@ -328,6 +328,18 @@ describe('GameStateManager', () => {
     expect(state.rendersWorld).toBe(true);
   });
 
+  it('holds a finished run still behind the report, and lets you keep exploring', () => {
+    const state = new GameStateManager(new EventBus());
+    for (const e of ['engineReady', 'assetsReady', 'startRun', 'worldReady', 'finalDelivery'] as const) {
+      state.send(e);
+    }
+    expect(state.current).toBe('complete');
+    expect(state.simulates).toBe(false);
+    expect(state.rendersWorld).toBe(true);
+    expect(state.send('resume')).toBe(true);
+    expect(state.current).toBe('playing');
+  });
+
   it('refuses illegal transitions', () => {
     const state = new GameStateManager(new EventBus());
     expect(state.send('pause')).toBe(false);

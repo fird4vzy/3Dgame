@@ -1,15 +1,22 @@
 import * as THREE from 'three';
 
 /**
- * Mount Fuji, beyond the edge of the world.
+ * Mount Fuji, painted on the horizon.
  *
  * The planet is sixty metres across, so a mountain *on* it could never look
- * like a distant mountain — it would be a hill you can walk up. This one
- * stands some four hundred and sixty metres out, past the planet's rim as seen
- * from the village, with its foot below that rim. From the village it rises over
- * the curve of the world the way a real mountain rises over the curve of the
- * sea, and like the sun it sets behind the planet as you walk round to the
- * far side.
+ * like a distant mountain — it would be a hill you can walk up. An earlier
+ * version stood it a few hundred metres off in the world, which looked right
+ * from the village and wrong everywhere else: a few dozen steps round a world
+ * this small is a large fraction of the way to it, and from the far side of
+ * the hill its flank filled half the sky.
+ *
+ * So it is a backdrop, like the sky: it travels with the camera, always the
+ * same distance off and the same size, its foot tucked just under the visible
+ * horizon and its summit a few degrees above it — the way it sits behind a
+ * shop front in a photograph. It stays toward one compass direction, which on
+ * a sphere cannot be defined everywhere (a direction projected onto the
+ * ground vanishes where the ground faces it), so it fades into the haze as
+ * you approach those two spots rather than spinning round them.
  *
  * It has its own small shader rather than a world material, because the
  * atmosphere is built for things within a few dozen metres: at that range
@@ -19,18 +26,15 @@ import * as THREE from 'three';
  * ravines down from a line two-thirds of the way up, as Fuji's does.
  */
 
-export interface FujiPlacement {
-  /** Local up at the place it is meant to be seen from. */
-  up: THREE.Vector3;
-  /** Unit vector in that place's tangent plane, toward the mountain. */
-  toward: THREE.Vector3;
-  /** Horizontal distance from the planet's axis through `up`, metres. */
+export interface FujiBackdrop {
+  /** World direction the mountain lies toward, projected onto the local ground. */
+  bearing: THREE.Vector3;
+  /** Horizontal distance from the camera, metres. Inside the camera's far plane. */
   distance: number;
-  /** Height of the mountain's foot along `up`, from the planet's centre. */
-  base: number;
-  height: number;
-  /** Radius of the foot. */
-  radius: number;
+  /** How far the summit stands above the visible horizon, radians. */
+  peak: number;
+  /** Radius of the sphere whose rim is the horizon. */
+  planetRadius: number;
 }
 
 export interface FujiLight {
@@ -88,6 +92,7 @@ const FRAGMENT = /* glsl */ `
   uniform vec3 uSnow;
   uniform float uHeight;
   uniform float uHazeAmount;
+  uniform float uOpacity;
   varying vec3 vNormalW;
   varying vec3 vLocal;
 
@@ -121,14 +126,25 @@ const FRAGMENT = /* glsl */ `
 
     // Aerial perspective, heavier toward the foot, which is lost in the air.
     float haze = mix(uHazeAmount * 0.35, min(0.95, uHazeAmount + 0.35), pow(1.0 - h, 1.8));
-    gl_FragColor = vec4(mix(colour, uHaze, haze), 1.0);
+    gl_FragColor = vec4(mix(colour, uHaze, haze), uOpacity);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
 `;
 
+/** The silhouette's proportions; the mesh is scaled to the size it must appear. */
+const PROFILE_HEIGHT = 150;
+const PROFILE_RADIUS = 350;
+/** How far the foot sinks below the horizon, radians, so no edge ever shows. */
+const FOOT_BELOW = THREE.MathUtils.degToRad(4);
+
+const _up = new THREE.Vector3();
+const _toward = new THREE.Vector3();
+const _yAxis = new THREE.Vector3(0, 1, 0);
+
 export class Fuji {
   readonly mesh: THREE.Mesh;
+  private readonly bearing: THREE.Vector3;
   private readonly uniforms = {
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
     uSunColour: { value: new THREE.Color(1, 1, 1) },
@@ -136,31 +152,56 @@ export class Fuji {
     uRock: { value: new THREE.Color('#4a4652') },
     uForest: { value: new THREE.Color('#2f3c3a') },
     uSnow: { value: new THREE.Color('#f1f4fa') },
-    uHeight: { value: 1 },
+    uHeight: { value: PROFILE_HEIGHT },
     uHazeAmount: { value: 0.5 },
+    uOpacity: { value: 1 },
   };
 
-  constructor(placement: FujiPlacement) {
-    const geometry = new THREE.LatheGeometry(fujiProfile(placement.height, placement.radius), 192);
-    this.uniforms.uHeight.value = placement.height;
+  constructor(private readonly backdrop: FujiBackdrop) {
+    this.bearing = backdrop.bearing.clone().normalize();
+    const geometry = new THREE.LatheGeometry(fujiProfile(PROFILE_HEIGHT, PROFILE_RADIUS), 192);
     const material = new THREE.ShaderMaterial({
       name: 'Fuji',
       uniforms: this.uniforms,
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
+      // Only so it can fade where its bearing is undefined; it still writes
+      // depth, and everything on the planet is nearer and drawn over it.
+      transparent: true,
     });
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.name = 'fuji';
     this.mesh.castShadow = false;
     this.mesh.receiveShadow = false;
+    // It follows the camera, so its bounds are never stale enough to matter,
+    // but it is never worth testing either: it is always in the distance.
+    this.mesh.frustumCulled = false;
+  }
 
-    // Stand it on its own up, which is the village's: seen from there it is
-    // upright, and from anywhere it can be seen at all it leans no more than
-    // a distant mountain on a round world should.
-    const up = placement.up.clone().normalize();
-    const toward = placement.toward.clone().projectOnPlane(up).normalize();
-    this.mesh.position.copy(up).multiplyScalar(placement.base).addScaledVector(toward, placement.distance);
-    this.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+  /**
+   * Stand it on the horizon as seen from `camera`: upright on the local up,
+   * toward the bearing, its foot under the rim and its summit `peak` above.
+   */
+  place(camera: THREE.Vector3): void {
+    const { distance, peak, planetRadius } = this.backdrop;
+    const altitude = Math.max(camera.length(), planetRadius + 0.01);
+    _up.copy(camera).divideScalar(altitude);
+    _toward.copy(this.bearing).projectOnPlane(_up);
+    const along = _toward.length();
+    this.uniforms.uOpacity.value = THREE.MathUtils.smoothstep(along, 0.22, 0.45);
+    this.mesh.visible = this.uniforms.uOpacity.value > 0.002;
+    if (!this.mesh.visible) return;
+    _toward.divideScalar(along);
+
+    // The rim of a sphere sits below level by this much, more the higher you are.
+    const dip = Math.acos(planetRadius / altitude);
+    const footY = distance * Math.tan(-dip - FOOT_BELOW);
+    const summitY = distance * Math.tan(-dip + peak);
+    const scale = (summitY - footY) / PROFILE_HEIGHT;
+
+    this.mesh.scale.setScalar(scale);
+    this.mesh.quaternion.setFromUnitVectors(_yAxis, _up);
+    this.mesh.position.copy(camera).addScaledVector(_toward, distance).addScaledVector(_up, footY);
   }
 
   /** Follow the mood: the sun's colour and direction, and how thick the air is. */

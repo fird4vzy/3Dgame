@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { GrassField } from '../../src/game/world/GrassField';
 import { plantTrees } from '../../src/game/world/Trees';
-import { isSoftwareRenderer } from '../../src/engine/platform/Viewport';
+import { isIntegratedGpu, isSoftwareRenderer } from '../../src/engine/platform/Viewport';
 import { Fuji, fujiProfile } from '../../src/game/world/Fuji';
 
 /**
@@ -158,6 +158,15 @@ describe('quality tier', () => {
     expect(isSoftwareRenderer('Apple M2')).toBe(false);
     expect(isSoftwareRenderer('')).toBe(false);
   });
+
+  it('tells graphics built into the CPU from a graphics card', () => {
+    expect(isIntegratedGpu('ANGLE (Intel, Intel(R) Graphics (0x00007D55) Direct3D11 vs_5_0 ps_5_0, D3D11)')).toBe(true);
+    expect(isIntegratedGpu('ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11)')).toBe(true);
+    expect(isIntegratedGpu('ANGLE (AMD, AMD Radeon(TM) Graphics Direct3D11)')).toBe(true);
+    expect(isIntegratedGpu('ANGLE (Intel, Intel(R) Arc(TM) A770 Graphics Direct3D11)')).toBe(false);
+    expect(isIntegratedGpu('ANGLE (AMD, AMD Radeon RX 7800 XT Direct3D11)')).toBe(false);
+    expect(isIntegratedGpu('ANGLE (NVIDIA, NVIDIA GeForce RTX 5060 Ti Direct3D11)')).toBe(false);
+  });
 });
 
 describe('Fuji', () => {
@@ -186,16 +195,39 @@ describe('Fuji', () => {
     expect((Math.atan(top) * 180) / Math.PI).toBeLessThan(35);
   });
 
-  it('stands upright on the up it is given, at the distance it is given', () => {
-    const up = new THREE.Vector3(1, 2, 0.5).normalize();
-    const toward = new THREE.Vector3(0, 0, 1).projectOnPlane(up).normalize();
-    const fuji = new Fuji({ up, toward, distance: 460, base: -15, height: 150, radius: 350 });
-    const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(fuji.mesh.quaternion);
-    expect(axis.dot(up)).toBeCloseTo(1, 6);
-    const along = fuji.mesh.position.clone().projectOnPlane(up).length();
-    expect(along).toBeCloseTo(460, 3);
-    expect(fuji.mesh.position.dot(up)).toBeCloseTo(-15, 3);
+  it('stands on the horizon wherever you are: upright, same size, never closer', () => {
+    const bearing = new THREE.Vector3(0, 0, 1);
+    const fuji = new Fuji({ bearing, distance: 380, peak: THREE.MathUtils.degToRad(7), planetRadius: 60 });
+    const summitElevation = (camera: THREE.Vector3): number => {
+      fuji.place(camera);
+      const up = camera.clone().normalize();
+      const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(fuji.mesh.quaternion);
+      expect(axis.dot(up)).toBeCloseTo(1, 6);
+      const top = fuji.mesh.position.clone().addScaledVector(up, 150 * fuji.mesh.scale.y).sub(camera);
+      const horizontal = top.clone().projectOnPlane(up).length();
+      expect(horizontal).toBeCloseTo(380, 3);
+      const dip = Math.acos(60 / camera.length());
+      return Math.atan2(top.dot(up), horizontal) + dip;
+    };
+    const a = summitElevation(new THREE.Vector3(1, 2, 0.5).normalize().multiplyScalar(63));
+    const b = summitElevation(new THREE.Vector3(-1, 0.3, -0.2).normalize().multiplyScalar(66));
+    expect(a).toBeCloseTo(THREE.MathUtils.degToRad(7), 5);
+    expect(b).toBeCloseTo(THREE.MathUtils.degToRad(7), 5);
     expect(fuji.mesh.castShadow).toBe(false);
+    fuji.dispose();
+  });
+
+  it('fades out where its bearing points straight into the ground', () => {
+    const fuji = new Fuji({
+      bearing: new THREE.Vector3(0, 0, 1),
+      distance: 380,
+      peak: 0.12,
+      planetRadius: 60,
+    });
+    fuji.place(new THREE.Vector3(0, 0, 63));
+    expect(fuji.mesh.visible).toBe(false);
+    fuji.place(new THREE.Vector3(0, 63, 0));
+    expect(fuji.mesh.visible).toBe(true);
     fuji.dispose();
   });
 });

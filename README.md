@@ -66,9 +66,13 @@ is authored in.
   jump for joy after each delivery) retargeted onto her rig at load
   ([`docs/27`](docs/27-aria-in-motion.md)). The Meshy model generated from
   the sheet ([`docs/26`](docs/26-the-heroine.md)) is the fallback
-- Mount Fuji over the village, beyond the planet's rim
-  ([`docs/28`](docs/28-fuji-and-the-courier-in-burgundy.md))
-- 243 unit tests, two browser suites including a full scripted playthrough
+- Mount Fuji on the horizon: a backdrop that travels with the camera, the
+  same size from anywhere ([`docs/29`](docs/29-frame-rate-fuji-on-the-horizon.md))
+- Steady on integrated graphics: every static prop is culled per instance at
+  the horizon, street lamps share a fixed pool of lights so no shader ever
+  recompiles mid-game, and the quality tier is read from the GPU (override
+  with `?quality=low|medium|high`) ([`docs/29`](docs/29-frame-rate-fuji-on-the-horizon.md))
+- 250 unit tests, two browser suites including a full scripted playthrough
 
 Payload today: 0.3 MB gzipped JS, 6.6 MB of models, 16.5 MB for the VRM plus
 0.5 MB of captured clips, 2.2 MB of audio. Grass, trees, leaf textures, sky

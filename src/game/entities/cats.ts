@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { makeRng } from '@core/math/rng';
 import { PlanetTerrain } from '@game/world/PlanetTerrain';
 import { loadInstancedProp, orientToSurface } from '@engine/render/instancedProp';
+import { horizonReach } from '@engine/render/HorizonInstances';
+import { SEA_LEVEL_RADIUS } from '@config/constants';
 
 /**
  * Cats.
@@ -55,7 +57,15 @@ const _position = new THREE.Vector3();
 const _quat = new THREE.Quaternion();
 const _tilt = new THREE.Quaternion();
 const _axisX = new THREE.Vector3(1, 0, 0);
-const _hiddenMatrix = new THREE.Matrix4();
+
+/** Highest point of a sitting cat above its spot, with room for the press. */
+const CAT_TOP = 0.6;
+
+/** Whether a cat at `position` crests the horizon as seen from `viewer`. */
+function canBeSeen(position: THREE.Vector3, viewer: THREE.Vector3, viewerRadius: number): boolean {
+  const reach = horizonReach(SEA_LEVEL_RADIUS - 0.5, viewerRadius, position.length() + CAT_TOP);
+  return position.angleTo(viewer) < reach + 0.03;
+}
 
 /** How long the delight from one pet lasts, in seconds. */
 const PET_DURATION = 1.4;
@@ -118,9 +128,7 @@ export class Cats {
     //
     // So there are two: eyes open, and eyes squeezed shut mid-purr. Same
     // colours, same collar, same bell. Both are instanced over the same spots,
-    // and `update` writes a zero scale into whichever one should not be seen —
-    // a degenerate instance costs nothing and needs no per-instance visibility,
-    // which InstancedMesh does not have.
+    // and `update` packs each cat into whichever one it should be wearing.
     const [calm, happy] = await Promise.all([
       loadInstancedProp(`${baseUrl}assets/models/cat.glb`, this.spots, this.seed, options),
       loadInstancedProp(`${baseUrl}assets/models/cat_happy.glb`, this.spots, this.seed, options),
@@ -139,12 +147,17 @@ export class Cats {
    * wobble; a body that *changes where it is facing*, holds it, and later
    * changes again reads as something making up its own mind.
    */
-  update(dt: number, playerPosition?: THREE.Vector3): void {
+  update(dt: number, playerPosition?: THREE.Vector3, viewer?: THREE.Vector3): void {
     const mesh = this.mesh;
     if (!mesh) return;
 
     this.time += dt;
     const follow = 1 - Math.exp(-2.4 * dt);
+    // Each mesh draws only the cats that wear its face and can be seen: they
+    // are packed to the front of its instance buffer and `count` stops there.
+    let calmCount = 0;
+    let happyCount = 0;
+    const viewerRadius = viewer ? viewer.length() : 0;
 
     for (let i = 0; i < this.cats.length; i++) {
       const cat = this.cats[i]!;
@@ -216,6 +229,11 @@ export class Cats {
 
       _matrix.compose(_position, _quat, _scale);
 
+      // Round the curve of the planet: not drawn at all. A zero-scale instance
+      // is invisible but not free — every vertex of it still goes through the
+      // vertex shader, which on integrated graphics is the cost that matters.
+      if (viewer && !canBeSeen(cat.position, viewer, viewerRadius)) continue;
+
       // Show exactly one face.
       //
       // The expression flips a beat *before* the delight fades, not with it: a
@@ -231,16 +249,12 @@ export class Cats {
       // change expression, which is a limitation; a cat that disappears is a
       // bug, and the two must never be confused.
       const wantsHappy = cat.happy > PET_DURATION * 0.12;
-      const shown = (wantsHappy ? this.happyMesh : mesh) ?? mesh;
-      const hidden = shown === mesh ? this.happyMesh : mesh;
-
-      shown.setMatrixAt(i, _matrix);
-      if (hidden && hidden !== shown) {
-        _hiddenMatrix.makeScale(0, 0, 0);
-        hidden.setMatrixAt(i, _hiddenMatrix);
-      }
+      if (wantsHappy && this.happyMesh) this.happyMesh.setMatrixAt(happyCount++, _matrix);
+      else mesh.setMatrixAt(calmCount++, _matrix);
     }
 
+    mesh.count = calmCount;
+    if (this.happyMesh) this.happyMesh.count = happyCount;
     mesh.instanceMatrix.needsUpdate = true;
     if (this.happyMesh) this.happyMesh.instanceMatrix.needsUpdate = true;
   }

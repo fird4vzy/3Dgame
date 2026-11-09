@@ -84,6 +84,8 @@ function instanced(
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.count = positions.length;
+  // Static: only the copies over the horizon are drawn (HorizonInstances).
+  mesh.userData.horizonCull = true;
 
   const base = (material as THREE.Material & { color?: THREE.Color }).color;
 

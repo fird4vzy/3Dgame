@@ -9,6 +9,8 @@ const BASE_VFOV_DEG = 55;
 const BASE_ASPECT = 16 / 9;
 const MIN_FOV = 45;
 const MAX_FOV = 82;
+/** The lowest dynamic resolution: below this the picture is mush, and it buys little. */
+const MIN_SCALE = 0.6;
 
 /**
  * Owns the WebGL renderer and the main camera.
@@ -29,6 +31,7 @@ export class RendererService {
 
   private resolutionScale = 1;
   private targetScale = 1;
+  private adaptClock = 0;
   private baseFov = BASE_VFOV_DEG;
   private contextLost = false;
 
@@ -84,12 +87,22 @@ export class RendererService {
 
   /**
    * Feed the current frame rate in; the render target scales down when we are
-   * below target and recovers slowly when we are comfortably above it.
+   * below target and recovers when we are comfortably above it.
+   *
+   * Judged twice a second, not every frame. The rate is a 30-frame average, so
+   * a change of scale takes half a second to show in it; judged every frame,
+   * one slow patch (shaders compiling at load) stepped the scale to the floor
+   * before the first step could register. And a band rather than a line: it
+   * used to recover only above 58 fps, which a 60 Hz display rarely reports,
+   * so once down it stayed down — a blurred picture for no frames gained.
    */
   updateAdaptiveResolution(fps: number, dt: number): void {
     if (fps <= 0) return;
-    if (fps < 55) this.targetScale = Math.max(0.65, this.targetScale - 0.1);
-    else if (fps > 58) this.targetScale = Math.min(1, this.targetScale + 0.02 * dt * 60);
+    this.adaptClock += dt;
+    if (this.adaptClock < 0.5) return;
+    this.adaptClock = 0;
+    if (fps < 40) this.targetScale = Math.max(MIN_SCALE, this.targetScale - 0.1);
+    else if (fps > 52) this.targetScale = Math.min(1, this.targetScale + 0.05);
 
     if (Math.abs(this.targetScale - this.resolutionScale) > 0.01) {
       this.resolutionScale = this.targetScale;

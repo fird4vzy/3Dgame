@@ -54,7 +54,9 @@ import { loadInstancedProp, type InstancedPropOptions } from '@engine/render/ins
 import { loadStylisedModel } from '@engine/render/stylise';
 import { createStarfield } from '@game/world/Skydome';
 import { Environment } from '@game/world/Environment';
-import { Fuji, type FujiPlacement } from '@game/world/Fuji';
+import { Fuji, type FujiBackdrop } from '@game/world/Fuji';
+import { HorizonInstances } from '@engine/render/HorizonInstances';
+import { LightPool } from '@engine/render/LightPool';
 import { GrassField } from '@game/world/GrassField';
 import { plantTrees, updateTrees, type TreeSpecies } from '@game/world/Trees';
 import { WaterReflection } from '@game/world/WaterReflection';
@@ -78,6 +80,9 @@ const LIT_TINT = new THREE.Color('#ffffff');
 const _emitUp = new THREE.Vector3();
 const _parcelTarget = new THREE.Vector3();
 const _parcelPull = new THREE.Vector3();
+/** The lantern's spring: ≈4.8 Hz, well above a running arm's swing, ζ ≈ 0.55. */
+const PARCEL_STIFFNESS = 900;
+const PARCEL_DAMPING = 33;
 const STEAM = new THREE.Color('#7f939b');
 const _emitPos = new THREE.Vector3();
 const DUST_COLOUR = new THREE.Color('#b9ae94');
@@ -158,6 +163,21 @@ export class PlanetScene implements IScene {
   /** Sky, sun, air and the light they cast. */
   private environment!: Environment;
   private fuji: Fuji | null = null;
+  /**
+   * Static instanced props, drawn only where they crest the horizon. The sea
+   * floor is the lowest ground, so it is the sphere that hides things.
+   */
+  private readonly horizonInstances = new HorizonInstances(SEA_LEVEL_RADIUS - 0.5);
+  private horizonScanChildren = -1;
+  private horizonScanClock = 0;
+  /** The few point lights the street lamps share; see LightPool. */
+  private lampLights!: LightPool;
+  /**
+   * The carried lantern's spot light. One for the whole game, always in the
+   * scene and dark between deliveries: adding and removing it with each parcel
+   * changed the light count, which recompiles every material.
+   */
+  private parcelGlow!: THREE.SpotLight;
   private grass: GrassField | null = null;
   private waterReflection: WaterReflection | null = null;
   /** Set once onEnter has handed the rig its occluders; later trunks register themselves. */
@@ -415,6 +435,7 @@ export class PlanetScene implements IScene {
     this.world.update(dt);
     this.updateCharacterLights();
     this.illumination.update(dt);
+    this.lampLights.update(this.player.object3D.position);
     this.shards.update(dt, this.player.object3D.position);
     this.syncCharacterAnimation(dt);
     this.updateCharacterTint();
@@ -424,7 +445,7 @@ export class PlanetScene implements IScene {
     this.obstacleClock += dt;
     if (this.obstaclesDirty && this.obstacleClock > 0.5) this.flushObstacles();
     this.grass?.update(dt, this.controller.smoothedPosition, this.renderer.camera);
-    this.cats?.update(dt, this.player.object3D.position);
+    this.cats?.update(dt, this.player.object3D.position, this.renderer.camera.position);
     this.updateFireflies(dt);
     this.updatePetals(dt);
     this.updateParcelVisual(dt);
@@ -461,9 +482,11 @@ export class PlanetScene implements IScene {
       dt,
     );
     this.cullBelowHorizon();
+    this.cullInstancesBelowHorizon(dt);
     if (this.fuji) {
       // Like the sky: the orbital menu shot is the planet against space.
-      this.fuji.mesh.visible = !this.menuMode;
+      if (this.menuMode) this.fuji.mesh.visible = false;
+      else this.fuji.place(this.renderer.camera.position);
       this.fuji.update({
         sunDirection: this.environment.sunDirection,
         sun: this.environment.sun,
@@ -636,6 +659,11 @@ export class PlanetScene implements IScene {
     // from the background rather than merely brightening her.
     this.characterRim = new THREE.PointLight(0xffd2a0, 0.3, 4.5, 2);
     scene.add(this.characterRim);
+
+    // Street lamps borrow from a fixed set of lights, so walking past them
+    // never changes how many lights the scene has (LightPool).
+    this.lampLights = new LightPool({ low: 2, medium: 4, high: 6 }[this.renderer.tier]);
+    for (const light of this.lampLights.lights) scene.add(light);
   }
 
   private buildPlayer(): void {
@@ -647,6 +675,10 @@ export class PlanetScene implements IScene {
 
     this.player = new Entity('player', new THREE.Group());
     this.player.object3D.add(createPlaceholderCharacter());
+    // Dark until there is a lantern to hang it from (see attachParcel).
+    this.parcelGlow = new THREE.SpotLight(0xffffff, 0, 7, Math.PI * 0.2, 0.7, 2);
+    this.parcelGlow.name = 'parcel-glow';
+    this.player.object3D.add(this.parcelGlow, this.parcelGlow.target);
     this.player.tags.add('player');
     this.player.object3D.position.copy(spawn);
 
@@ -701,6 +733,7 @@ export class PlanetScene implements IScene {
         this.world.scene.add(group);
         this.cullables.push(group);
         this.addObstacle(group);
+        this.lampLights.addSource(light);
 
         lights.push(light);
         bulbs.push(bulb);
@@ -1058,6 +1091,18 @@ export class PlanetScene implements IScene {
     this.carriedWeight = weight;
 
     const parcel = createParcel(colour);
+    // The lantern brings its own spot light; swap in the one the scene keeps,
+    // aimed the same way, so the scene's light count stays what it was.
+    const fresh = parcel.glow;
+    this.parcelGlow.position.copy(fresh.position);
+    this.parcelGlow.target.position.copy(fresh.target.position);
+    this.parcelGlow.color.copy(fresh.color);
+    this.parcelGlow.intensity = fresh.intensity;
+    fresh.target.removeFromParent();
+    fresh.removeFromParent();
+    fresh.dispose();
+    parcel.group.add(this.parcelGlow, this.parcelGlow.target);
+    parcel.glow = this.parcelGlow;
 
     // The lantern lives in the body's space and *follows* the hand on a
     // spring, rather than being parented to the bone. Parented, it inherited
@@ -1075,6 +1120,9 @@ export class PlanetScene implements IScene {
 
   private detachParcel(): void {
     if (!this.parcelVisual) return;
+    // Park the spot light back on her, dark, before the lantern is thrown away.
+    this.parcelGlow.intensity = 0;
+    this.player.object3D.add(this.parcelGlow, this.parcelGlow.target);
     (this.parcelParent ?? this.player.object3D).remove(this.parcelVisual.group);
     this.parcelParent = null;
     this.parcelVisual.group.traverse((object) => {
@@ -1104,11 +1152,19 @@ export class PlanetScene implements IScene {
     } else {
       _parcelTarget.set(0.3, 0.95 + Math.sin(this.bobTimer * 1.6 * Math.PI * 2) * 0.02, 0.14);
     }
-    // A slightly under-damped spring: it settles in a few swings.
-    const step = Math.min(dt, 1 / 30);
-    _parcelPull.subVectors(_parcelTarget, group.position).multiplyScalar(140 * step);
-    this.parcelVelocity.add(_parcelPull).multiplyScalar(Math.max(0, 1 - 13 * step));
-    group.position.addScaledVector(this.parcelVelocity, step);
+    // A stiff, slightly under-damped spring: it sways a touch and settles at
+    // once. It used to be soft (≈1.9 Hz), which is the arm swing of a run, so
+    // it resonated and trailed half a stride behind her hand. Sub-stepped at a
+    // fixed rate so a slow frame advances it by the whole frame; clamping the
+    // step instead ran it in slow motion below 30 fps and the lag got worse.
+    const elapsed = Math.min(dt, 0.25);
+    const substeps = Math.max(1, Math.ceil(elapsed * 120));
+    const step = elapsed / substeps;
+    for (let i = 0; i < substeps; i++) {
+      _parcelPull.subVectors(_parcelTarget, group.position).multiplyScalar(PARCEL_STIFFNESS * step);
+      this.parcelVelocity.add(_parcelPull).multiplyScalar(Math.max(0, 1 - PARCEL_DAMPING * step));
+      group.position.addScaledVector(this.parcelVelocity, step);
+    }
     // A long way off (a teleport, a respawn) it simply jumps.
     if (group.position.distanceToSquared(_parcelTarget) > 1) {
       group.position.copy(_parcelTarget);
@@ -1337,6 +1393,8 @@ export class PlanetScene implements IScene {
     );
     if (!mesh) return;
 
+    // Static from here on: only the copies over the horizon are drawn.
+    mesh.userData.horizonCull = true;
     this.world.scene.add(mesh);
     this.addObstacle(mesh);
     // Instances span the planet, so the whole mesh must not be horizon-culled
@@ -1770,19 +1828,35 @@ export class PlanetScene implements IScene {
       object.visible = shouldBeVisible(object, viewer, PLANET_RADIUS);
     }
   }
+
+  /**
+   * Hand every static instanced prop to the horizon culler, then cull from
+   * where the camera actually is. Props load asynchronously, so new ones are
+   * looked for whenever the scene gains a child, and every couple of seconds
+   * in case one arrived inside a group.
+   */
+  private cullInstancesBelowHorizon(dt: number): void {
+    const scene = this.world.scene;
+    this.horizonScanClock += dt;
+    if (scene.children.length !== this.horizonScanChildren || this.horizonScanClock > 2) {
+      this.horizonScanChildren = scene.children.length;
+      this.horizonScanClock = 0;
+      scene.traverse((object) => {
+        const mesh = object as THREE.InstancedMesh;
+        if (mesh.isInstancedMesh && mesh.userData.horizonCull === true) this.horizonInstances.add(mesh);
+      });
+    }
+    this.horizonInstances.update(this.renderer.camera.position);
+  }
 }
 
 /**
- * Where Fuji stands: west-south-west of the village, 460 m out, its peak 9°
- * above the village's horizon and its foot well below the rim.
- *
- * West-south-west because that is where the village looks out. It sits in a
- * hollow, and toward the south-east (front-lit, opposite the sun) the hill
- * under the shrine hid everything but the very tip; a terrain-horizon survey
- * found the land falling away to the west. The sun, north-north-west of
- * everyone (Environment's SUN_AZIMUTH), lights it from the side (docs/28).
+ * Fuji's backdrop: toward the west-south-west of the village, the way the
+ * village looks out (the land falls away there, and the sun north-north-west
+ * of everyone lights it from the side — docs/28). It stays toward that same
+ * world direction wherever you walk, on the horizon, a modest 7° tall.
  */
-function fujiFromTheVillage(): FujiPlacement {
+function fujiFromTheVillage(): FujiBackdrop {
   const landing = DISTRICTS.find((d) => d.id === 'landing');
   const c = latLonToCartesian(landing?.centre.lat ?? 62, landing?.centre.lon ?? 30, 1);
   const up = new THREE.Vector3(c.x, c.y, c.z).normalize();
@@ -1790,5 +1864,10 @@ function fujiFromTheVillage(): FujiPlacement {
   const east = new THREE.Vector3().crossVectors(up, north).normalize();
   const bearing = THREE.MathUtils.degToRad(250);
   const toward = north.multiplyScalar(Math.cos(bearing)).addScaledVector(east, Math.sin(bearing));
-  return { up, toward, distance: 460, base: -15, height: 150, radius: 350 };
+  return {
+    bearing: toward,
+    distance: 380,
+    peak: THREE.MathUtils.degToRad(7),
+    planetRadius: PLANET_RADIUS,
+  };
 }
