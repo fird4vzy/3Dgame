@@ -56,7 +56,9 @@ export class RendererService {
 
     if (viewport.tier !== 'low') {
       this.renderer.shadowMap.enabled = true;
-      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      // A drawn shadow has an edge. The soft filter cost three times the taps
+      // to blur it away.
+      this.renderer.shadowMap.type = THREE.PCFShadowMap;
     }
 
     // Far enough for the mountain past the rim (game/world/Fuji, ~400 m).
@@ -72,6 +74,9 @@ export class RendererService {
 
   /** Base field of view before aspect correction. Contextual cameras set this. */
   setBaseFov(deg: number): void {
+    // Called every frame by the camera rig; only a real change is worth a
+    // new projection matrix.
+    if (Math.abs(deg - this.baseFov) < 0.01) return;
     this.baseFov = deg;
     this.applyFov();
   }
@@ -113,6 +118,30 @@ export class RendererService {
   render(scene: THREE.Scene, deltaTime = 1 / 60): void {
     if (this.contextLost) return;
     this.postFX.render(scene, deltaTime);
+  }
+
+  /**
+   * The frame just drawn, as a small JPEG data URL. Must be called in the same
+   * task as the render, while the drawing buffer still holds it.
+   */
+  snapshot(width: number, height: number): string | null {
+    if (typeof document === 'undefined') return null;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      const source = this.renderer.domElement;
+      // Cover, not stretch: crop the frame to the card's shape.
+      const scale = Math.max(width / source.width, height / source.height);
+      const w = source.width * scale;
+      const h = source.height * scale;
+      ctx.drawImage(source, (width - w) / 2, (height - h) / 2, w, h);
+      return canvas.toDataURL('image/jpeg', 0.72);
+    } catch {
+      return null;
+    }
   }
 
   dispose(): void {

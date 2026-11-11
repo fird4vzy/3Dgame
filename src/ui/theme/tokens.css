@@ -1,18 +1,11 @@
 /**
- * Design tokens. Restyling the game is this one file.
+ * Design tokens and the interface's drawn components.
  *
- * The palette is derived from the illumination state: the interface literally
- * warms up as the planet lights, which ties the UI to the core hook rather than
- * floating above it (docs/10-ui-flow.md §10.5).
- */
-/**
- * Display face.
- *
- * Palatino was the wrong instrument entirely — a European book serif on a game
- * whose reference is chunky, outlined and hand-drawn. Weight and roundness are
- * what carry that look, and no amount of styling around a bookish serif gets
- * there. Self-hosted rather than linked: 30 KB, and a title screen that waits on
- * a third-party font request is a title screen that flashes.
+ * The interface is a manga page laid over the game: cream paper, a heavy ink
+ * line, one red — the red of a name seal — and screentone where a printed page
+ * would have it. Panels are cut slightly off square and cast a hard, flat
+ * shadow, because that is how panels sit on a page. Restyling the game is this
+ * one file.
  */
 @font-face {
   font-family: "Lumen Display";
@@ -23,32 +16,31 @@
 }
 
 :root {
-  --lp-dusk: #141724;
-  --lp-dusk-raised: #232842;
-  --lp-dusk-sunk: #0f1220;
-  --lp-ink: #f4efe4;
-  --lp-ink-soft: #b3b8cd;
-  --lp-ink-faint: #7d84a0;
-  --lp-rule: #363d5e;
+  /* Paper and ink. */
+  --lp-paper: #f7f0df;
+  --lp-paper-warm: #efe4cc;
+  --lp-paper-shade: #ddd0b4;
+  --lp-ink: #221c2b;
+  --lp-ink-soft: #5a5168;
+  --lp-ink-faint: #8d8496;
+  /* The one accent: seal red. Lantern amber is for light, not for chrome. */
+  --lp-seal: #c8402f;
+  --lp-seal-deep: #9c2c20;
+  --lp-indigo: #2c3b6b;
   --lp-lumen: #f0a52e;
   --lp-lumen-bright: #ffc45c;
-  --lp-lumen-deep: #c97a1c;
-  --lp-lumen-wash: rgba(240, 165, 46, 0.16);
-  --lp-danger: #d85a2c;
+  --lp-danger: #c8402f;
+  --lp-rule: rgba(34, 28, 43, 0.22);
 
-  /**
-   * The ink line.
-   *
-   * Everything in the reference sits behind a heavy dark outline — it is not a
-   * border in the CSS sense, it is the drawing. Sharing one token keeps the
-   * weight identical across buttons, panels and chips, which is most of what
-   * makes a set of controls look like one set.
-   */
-  --lp-outline: #14101c;
-  --lp-outline-w: 2.5px;
-  /* Hard offset shadow, no blur — a drawn drop shadow, not a soft one. */
-  --lp-lift: 0 4px 0 var(--lp-outline);
-  --lp-lift-pressed: 0 1px 0 var(--lp-outline);
+  /* Kept for the few things drawn straight onto the dark game view. */
+  --lp-dusk: #141724;
+  --lp-on-dark: #f7f0df;
+
+  --lp-outline: var(--lp-ink);
+  --lp-outline-w: 3px;
+  --lp-lift: 5px 5px 0 var(--lp-ink);
+  --lp-lift-small: 3px 3px 0 var(--lp-ink);
+  --lp-lift-pressed: 1px 1px 0 var(--lp-ink);
 
   --lp-space-1: 4px;
   --lp-space-2: 8px;
@@ -57,15 +49,21 @@
   --lp-space-5: 24px;
   --lp-space-6: 32px;
 
-  --lp-radius: 12px;
-  --lp-radius-sm: 8px;
+  --lp-radius: 6px;
+  --lp-radius-sm: 4px;
 
   --lp-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
-  --lp-fast: 180ms;
-  --lp-slow: 240ms;
+  --lp-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --lp-fast: 160ms;
+  --lp-slow: 260ms;
 
   --lp-font-display: "Lumen Display", system-ui, "Segoe UI", sans-serif;
   --lp-font-body: "Lumen Display", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --lp-font-seal: "Yu Mincho", "Hiragino Mincho ProN", "Noto Serif JP", "Songti SC", serif;
+
+  /* Screentone: a dot grid, as printed. */
+  --lp-tone: radial-gradient(circle at 1.5px 1.5px, rgba(34, 28, 43, 0.2) 1.1px, transparent 1.4px) 0 0 / 6px 6px;
+  --lp-tone-light: radial-gradient(circle at 1.5px 1.5px, rgba(34, 28, 43, 0.1) 1px, transparent 1.3px) 0 0 / 6px 6px;
 
   --lp-ui-scale: 1;
 }
@@ -77,55 +75,27 @@
     --lp-slow: 1ms;
   }
 }
-
-/**
- * Menu key art.
- *
- * The art is composed 16:9 with its left third empty for the title. Crop it to
- * a squarer window at a fixed `object-position` and that empty third is the
- * first thing thrown away — the title lands on the lighthouse. So the crop
- * window slides left as the viewport narrows, trading planet for breathing
- * room, and the scrim gets steeper to cover what is left.
- */
-.lp-menu-art {
-  object-position: 75% 50%;
+.lp-reduce-motion {
+  --lp-fast: 1ms;
+  --lp-slow: 1ms;
+}
+.lp-reduce-motion *,
+.lp-reduce-motion *::before,
+.lp-reduce-motion *::after {
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
 }
 
-.lp-menu-scrim {
-  background: linear-gradient(
-    100deg,
-    rgba(10, 13, 26, 0.92) 0%,
-    rgba(10, 13, 26, 0.78) 26%,
-    rgba(10, 13, 26, 0.35) 48%,
-    rgba(10, 13, 26, 0) 68%
-  );
+.lp-root {
+  font-family: var(--lp-font-body);
+  color: var(--lp-ink);
+  font-size: calc(16px * var(--lp-ui-scale));
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-@media (max-aspect-ratio: 4 / 3) {
-  .lp-menu-art {
-    object-position: 34% 50%;
-  }
-
-  .lp-menu-scrim {
-    background: linear-gradient(
-      170deg,
-      rgba(10, 13, 26, 0.9) 0%,
-      rgba(10, 13, 26, 0.72) 38%,
-      rgba(10, 13, 26, 0.2) 72%,
-      rgba(10, 13, 26, 0) 100%
-    );
-  }
-}
-
-/**
- * Icons, as masks rather than pictures.
- *
- * The art is a white shape with an alpha channel, used as a `mask-image`, so
- * the icon takes its colour from `background-color` — which means it inherits
- * the design tokens, warms up with the illumination palette, and dims when a
- * control is disabled. Ship the same icons as coloured PNGs and every one of
- * those becomes a separate asset to regenerate.
- */
+/* ── icons, as masks ─────────────────────────────────────────────────────── */
 .lp-icon {
   display: inline-block;
   flex: none;
@@ -138,236 +108,171 @@
   mask-size: contain;
 }
 
+/* ── screens ─────────────────────────────────────────────────────────────── */
 .lp-screen {
   position: absolute;
   inset: 0;
   display: grid;
   pointer-events: auto;
-  font-family: var(--lp-font-body);
-  color: var(--lp-ink);
-  font-size: calc(16px * var(--lp-ui-scale));
   padding: max(var(--lp-space-5), env(safe-area-inset-top))
     max(var(--lp-space-5), env(safe-area-inset-right))
     max(var(--lp-space-5), env(safe-area-inset-bottom))
     max(var(--lp-space-5), env(safe-area-inset-left));
+  place-content: center;
+  justify-items: center;
 }
 
+/* The world, seen through tracing paper. */
 .lp-scrim {
   position: absolute;
   inset: 0;
-  background: rgba(15, 18, 32, 0.72);
-  backdrop-filter: blur(8px) saturate(0.7);
+  background: var(--lp-tone-light), rgba(247, 240, 223, 0.62);
+  backdrop-filter: blur(3px) saturate(0.6);
 }
 
-/**
- * A panel is a drawn card, not a div with a hairline.
- *
- * The heavy outline plus a hard offset shadow is what makes it sit *on* the
- * scene rather than float in front of it, and the inset highlight along the top
- * edge is the cheap trick that gives a flat fill a sense of thickness — the
- * same one the reference uses on every one of its plates.
- */
+/* ── panel: a cut piece of paper with an ink edge ────────────────────────── */
 .lp-panel {
   position: relative;
-  background: linear-gradient(180deg, #2b3152 0%, var(--lp-dusk-raised) 55%, #1b2036 100%);
-  border: var(--lp-outline-w) solid var(--lp-outline);
+  background: var(--lp-paper);
+  border: var(--lp-outline-w) solid var(--lp-ink);
   border-radius: var(--lp-radius);
   padding: var(--lp-space-5);
-  box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.09),
-    inset 0 -2px 0 rgba(0, 0, 0, 0.3),
-    0 6px 0 var(--lp-outline),
-    0 22px 46px -22px rgba(0, 0, 0, 0.95);
-  max-width: 460px;
+  box-shadow: var(--lp-lift);
+  max-width: 480px;
   width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  animation: lp-panel-in var(--lp-slow) var(--lp-pop) both;
 }
-
-/**
- * Panel corner ornaments.
- *
- * Two corners, not four, and that is a choice rather than a limitation: the
- * top-left and bottom-right pair is the classic bookplate framing, it reads as
- * deliberate where four corners read as a border, and it costs two pseudo-
- * elements — so every existing `.lp-panel` picks it up without a single screen
- * having to build extra DOM.
- *
- * The mask URLs arrive as custom properties from `publishOrnaments()`, because
- * a stylesheet cannot read BASE_URL.
- */
-.lp-panel::before,
-.lp-panel::after {
+/* A band of screentone along the top, like the bleed of a title panel. */
+.lp-panel::before {
   content: "";
   position: absolute;
-  width: 42px;
-  height: 42px;
-  background-color: var(--lp-lumen);
-  opacity: 0.6;
+  inset: 0 0 auto 0;
+  height: 10px;
+  background: var(--lp-tone), var(--lp-paper-warm);
+  border-bottom: 2px solid var(--lp-ink);
   pointer-events: none;
-  -webkit-mask-image: var(--lp-orn-corner);
-  mask-image: var(--lp-orn-corner);
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: contain;
-  mask-size: contain;
+}
+.lp-panel > :first-child {
+  margin-top: var(--lp-space-2);
+}
+@keyframes lp-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) rotate(-0.6deg) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-.lp-panel::before {
-  top: 10px;
-  left: 10px;
-}
-
-.lp-panel::after {
-  bottom: 10px;
-  right: 10px;
-  transform: rotate(180deg);
-}
-
-/**
- * A flourish under the panel heading, in place of a plain rule.
- *
- * `mask-size: 100% 100%` — stretched, not `contain`. The slicer pads every
- * piece into a square so icons share an optical size, which is right for icons
- * and wrong for a rule: `contain` fits that square into the line's height and
- * leaves a 20-pixel stub. Stretching lets the ornament span the width it is
- * meant to, and a divider is one of the few shapes that survives being pulled
- * along its own axis.
- */
-.lp-title::after {
-  content: "";
-  display: block;
-  width: 190px;
-  max-width: 100%;
-  height: 20px;
-  margin-top: var(--lp-space-1);
-  /* `--lp-rule` is a border colour: against a raised panel it is very nearly
-     the panel itself, and the ornament vanished. A rule you cannot see is not
-     restraint, it is a missing element. */
-  opacity: 0.75;
-  background-color: var(--lp-ink-faint);
-  -webkit-mask-image: var(--lp-orn-divider);
-  mask-image: var(--lp-orn-divider);
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: left center;
-  mask-position: left center;
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
-}
-
-/**
- * Headings.
- *
- * Heavy, and outlined by a stack of text-shadows rather than by
- * `-webkit-text-stroke` — a stroke is centred on the glyph edge and eats into
- * the letterform, which at this weight closes up the counters. Four offset
- * copies sit entirely *outside* it.
- */
 .lp-title {
   font-family: var(--lp-font-display);
   font-weight: 700;
-  font-size: 2.1rem;
-  letter-spacing: 0.005em;
-  margin: 0 0 var(--lp-space-2);
+  font-size: 1.9rem;
+  line-height: 1.05;
+  letter-spacing: 0.01em;
+  margin: 0 0 var(--lp-space-1);
   color: var(--lp-ink);
-  text-shadow:
-    -2px 0 var(--lp-outline),
-    2px 0 var(--lp-outline),
-    0 -2px var(--lp-outline),
-    0 2px var(--lp-outline),
-    0 4px 0 rgba(0, 0, 0, 0.45);
+}
+/* A brush stroke under the heading. */
+.lp-title::after {
+  content: "";
+  display: block;
+  width: 86px;
+  height: 7px;
+  margin-top: 7px;
+  background: var(--lp-seal);
+  border-radius: 60% 40% 70% 30% / 60% 70% 30% 40%;
+  transform: rotate(-1.2deg);
 }
 
 .lp-sub {
   color: var(--lp-ink-soft);
-  margin: 0 0 var(--lp-space-5);
-  font-size: 0.9rem;
+  margin: var(--lp-space-2) 0 var(--lp-space-4);
+  font-size: 0.92rem;
+  line-height: 1.45;
 }
 
 .lp-actions {
   display: flex;
   flex-direction: column;
-  gap: var(--lp-space-2);
+  gap: 10px;
 }
 
-/**
- * Buttons, as drawn objects.
- *
- * Four things together make the reference's look, and dropping any one of them
- * loses it:
- *
- * - a heavy dark outline, the same weight everywhere;
- * - a vertical two-stop fill, lighter at the top, so the face reads as curved;
- * - an inset highlight along the top edge and a shadow along the bottom, which
- *   is what gives a flat rectangle thickness;
- * - a **hard** offset shadow beneath, no blur — a drawn shadow, not a soft one.
- *
- * The press is the payoff: the button travels down by exactly the height of its
- * own shadow, so it looks like a physical key bottoming out. That is why the
- * transform and the shadow have to change together.
- */
+/* ── buttons: drawn keys that travel when pressed ────────────────────────── */
 .lp-btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--lp-space-3);
-  /* 48px minimum touch target. */
-  min-height: 50px;
+  min-height: 48px;
   padding: 0 var(--lp-space-4);
-  border: var(--lp-outline-w) solid var(--lp-outline);
-  border-radius: 14px;
-  background: linear-gradient(180deg, #333a5e 0%, #262c49 100%);
+  border: var(--lp-outline-w) solid var(--lp-ink);
+  border-radius: var(--lp-radius);
+  background: var(--lp-paper);
   color: var(--lp-ink);
   font: inherit;
   font-weight: 600;
+  font-size: 1rem;
   letter-spacing: 0.01em;
+  text-align: left;
   cursor: pointer;
-  box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.1),
-    var(--lp-lift);
-  transform: translateY(0);
+  box-shadow: var(--lp-lift-small);
   transition:
-    background var(--lp-fast) var(--lp-ease),
-    transform 90ms var(--lp-ease),
-    box-shadow 90ms var(--lp-ease);
+    transform 80ms var(--lp-ease),
+    box-shadow 80ms var(--lp-ease),
+    background var(--lp-fast) var(--lp-ease);
 }
-
 .lp-btn:hover {
-  background: linear-gradient(180deg, #3d456d 0%, #2e3555 100%);
+  background: var(--lp-tone-light), var(--lp-paper-warm);
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--lp-ink);
 }
-
 .lp-btn:active {
-  transform: translateY(3px);
-  box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.08),
-    var(--lp-lift-pressed);
+  transform: translate(2px, 2px);
+  box-shadow: var(--lp-lift-pressed);
 }
-
 .lp-btn:focus-visible {
-  outline: 3px solid var(--lp-lumen-bright);
+  outline: 3px solid var(--lp-seal);
   outline-offset: 3px;
 }
-
 .lp-btn--primary {
-  background: linear-gradient(180deg, var(--lp-lumen-bright) 0%, var(--lp-lumen) 52%, var(--lp-lumen-deep) 100%);
-  color: #2b1c08;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
-  box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.5),
-    inset 0 -3px 0 rgba(0, 0, 0, 0.18),
-    var(--lp-lift);
+  background: var(--lp-seal);
+  color: var(--lp-paper);
 }
-
 .lp-btn--primary:hover {
-  background: linear-gradient(180deg, #ffd486 0%, var(--lp-lumen-bright) 52%, var(--lp-lumen) 100%);
+  background: var(--lp-seal-deep);
+}
+.lp-btn--quiet {
+  box-shadow: none;
+  border-width: 2px;
+  min-height: 40px;
+}
+.lp-btn--danger {
+  color: var(--lp-seal);
+  border-color: var(--lp-seal);
+  box-shadow: 3px 3px 0 var(--lp-seal);
+}
+.lp-btn small {
+  font-size: 0.78em;
+  font-weight: 500;
+  opacity: 0.8;
 }
 
-.lp-btn--primary:active {
-  transform: translateY(3px);
-  box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.45),
-    var(--lp-lift-pressed);
+/* ── settings rows ───────────────────────────────────────────────────────── */
+.lp-group {
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--lp-seal);
+  margin: var(--lp-space-4) 0 var(--lp-space-1);
+  padding-bottom: 3px;
+  border-bottom: 2px solid var(--lp-ink);
 }
-
 .lp-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -375,72 +280,1095 @@
   gap: var(--lp-space-3);
   min-height: 44px;
 }
-
-.lp-row label {
-  color: var(--lp-ink-soft);
-  font-size: 0.9rem;
+.lp-row label,
+.lp-row .lp-label {
+  color: var(--lp-ink);
+  font-size: 0.95rem;
 }
-
+.lp-row .lp-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
 .lp-row input[type="range"] {
   width: 160px;
-  accent-color: var(--lp-lumen);
+  accent-color: var(--lp-seal);
 }
-
-/**
- * The checkbox was the last system control left.
- *
- * One default white square in a panel of drawn objects is more conspicuous than
- * ten unstyled controls would be, because everything around it establishes the
- * rule it breaks. `appearance: none` plus the same outline, fill and hard
- * shadow the buttons use puts it back in the set.
- */
+.lp-row select {
+  font: inherit;
+  font-weight: 600;
+  color: var(--lp-ink);
+  background: var(--lp-paper);
+  border: 2px solid var(--lp-ink);
+  border-radius: var(--lp-radius-sm);
+  padding: 6px 8px;
+  min-height: 36px;
+}
 .lp-row input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
   width: 30px;
   height: 30px;
   margin: 0;
-  border: var(--lp-outline-w) solid var(--lp-outline);
-  border-radius: 9px;
-  background: linear-gradient(180deg, #333a5e 0%, #262c49 100%);
-  box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.1),
-    0 3px 0 var(--lp-outline);
+  border: var(--lp-outline-w) solid var(--lp-ink);
+  border-radius: var(--lp-radius-sm);
+  background: var(--lp-paper);
+  box-shadow: 2px 2px 0 var(--lp-ink);
   cursor: pointer;
   display: grid;
   place-items: center;
-  transition:
-    background var(--lp-fast) var(--lp-ease),
-    transform 90ms var(--lp-ease);
 }
-
 .lp-row input[type="checkbox"]:checked {
-  background: linear-gradient(180deg, var(--lp-lumen-bright) 0%, var(--lp-lumen) 100%);
+  background: var(--lp-seal);
 }
-
 /* The tick is drawn, not a glyph — a font character would not centre. */
 .lp-row input[type="checkbox"]:checked::after {
   content: "";
   width: 13px;
-  height: 8px;
-  border-left: 3.5px solid var(--lp-outline);
-  border-bottom: 3.5px solid var(--lp-outline);
+  height: 7px;
+  border-left: 3.5px solid var(--lp-paper);
+  border-bottom: 3.5px solid var(--lp-paper);
   transform: rotate(-45deg) translate(1px, -2px);
 }
-
-.lp-row input[type="checkbox"]:active {
-  transform: translateY(2px);
-  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.08);
-}
-
-.lp-row input[type="checkbox"]:focus-visible {
-  outline: 3px solid var(--lp-lumen-bright);
+.lp-row input:focus-visible,
+.lp-row select:focus-visible {
+  outline: 3px solid var(--lp-seal);
   outline-offset: 3px;
 }
 
 .lp-hint {
-  color: var(--lp-ink-faint);
+  color: var(--lp-ink-soft);
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
+  margin: var(--lp-space-4) 0 0;
+  line-height: 1.5;
+}
+
+/* A key, drawn. */
+.lp-key {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.7em;
+  height: 1.7em;
+  padding: 0 0.4em;
+  border: 2px solid var(--lp-ink);
+  border-radius: 4px;
+  background: var(--lp-paper);
+  color: var(--lp-ink);
+  box-shadow: 0 2px 0 var(--lp-ink);
+  font-size: 0.82em;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* A name seal: red, round-cornered, one character. */
+.lp-seal {
+  display: inline-grid;
+  place-items: center;
+  width: 2.2em;
+  height: 2.2em;
+  border: 3px solid var(--lp-seal);
+  border-radius: 18%;
+  color: var(--lp-seal);
+  font-family: var(--lp-font-seal);
+  font-weight: 700;
+  font-size: 1.25em;
+  line-height: 1;
+  transform: rotate(-4deg);
+}
+.lp-seal--blank {
+  border-style: dashed;
+  border-color: var(--lp-paper-shade);
+  color: var(--lp-paper-shade);
+}
+.lp-seal--stamped {
+  animation: lp-stamp 420ms var(--lp-pop) both;
+}
+@keyframes lp-stamp {
+  from {
+    opacity: 0;
+    transform: scale(2.4) rotate(-18deg);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(-4deg);
+  }
+}
+
+/* ── main menu ───────────────────────────────────────────────────────────── */
+.lp-menu {
+  place-content: center start;
+  justify-items: start;
+  padding-left: min(9vw, 96px);
+}
+.lp-menu-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(100deg, rgba(20, 23, 36, 0.82) 0%, rgba(20, 23, 36, 0.55) 34%, rgba(20, 23, 36, 0) 62%);
+}
+.lp-menu-card {
+  max-width: 400px;
+  transform: rotate(-1.2deg);
+}
+.lp-menu-title {
+  font-family: var(--lp-font-display);
+  font-weight: 700;
+  font-size: clamp(44px, 7vw, 74px);
+  line-height: 0.95;
+  margin: 0;
+  color: var(--lp-paper);
+  text-shadow:
+    -3px 0 var(--lp-ink),
+    3px 0 var(--lp-ink),
+    0 -3px var(--lp-ink),
+    0 3px var(--lp-ink),
+    6px 6px 0 var(--lp-seal);
+}
+.lp-menu-tagline {
+  display: inline-block;
+  margin: var(--lp-space-4) 0 var(--lp-space-5);
+  padding: 6px 12px;
+  background: var(--lp-paper);
+  border: 2px solid var(--lp-ink);
+  box-shadow: var(--lp-lift-small);
+  font-weight: 500;
+  font-size: clamp(14px, 1.5vw, 17px);
+  color: var(--lp-ink);
+  max-width: 30ch;
+  transform: rotate(1deg);
+}
+.lp-menu-vertical {
+  position: absolute;
+  top: 8vh;
+  right: min(6vw, 70px);
+  writing-mode: vertical-rl;
+  font-family: var(--lp-font-seal);
+  font-size: clamp(22px, 3vw, 38px);
+  letter-spacing: 0.3em;
+  color: var(--lp-paper);
+  text-shadow: 2px 2px 0 var(--lp-ink);
+  pointer-events: none;
+}
+.lp-menu-vertical b {
+  color: var(--lp-seal);
+  text-shadow: 2px 2px 0 var(--lp-paper);
+}
+
+@media (max-aspect-ratio: 4 / 5) {
+  .lp-menu {
+    place-content: end center;
+    justify-items: center;
+    padding-left: var(--lp-space-5);
+    padding-bottom: 10vh;
+  }
+  .lp-menu-scrim {
+    background: linear-gradient(0deg, rgba(20, 23, 36, 0.85) 0%, rgba(20, 23, 36, 0.4) 50%, rgba(20, 23, 36, 0) 80%);
+  }
+}
+
+/* ── intro: three panels ─────────────────────────────────────────────────── */
+.lp-intro {
+  background: var(--lp-tone-light), var(--lp-paper);
+}
+.lp-intro-page {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  width: min(940px, 100%);
+}
+.lp-intro-panel {
+  position: relative;
+  min-height: min(52vh, 380px);
+  padding: 18px 16px 16px;
+  border: var(--lp-outline-w) solid var(--lp-ink);
+  box-shadow: var(--lp-lift);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+  opacity: 0;
+  animation: lp-panel-in 420ms var(--lp-pop) both;
+}
+.lp-intro-panel:nth-child(1) {
+  transform: rotate(-1deg);
+  background: linear-gradient(180deg, #8fa9c8 0%, #c9d6e2 58%, #6f8a66 58%, #5d7a58 100%);
+}
+.lp-intro-panel:nth-child(2) {
+  animation-delay: 380ms;
+  background: linear-gradient(180deg, #2c3b6b 0%, #4a5a8c 100%);
+}
+.lp-intro-panel:nth-child(3) {
+  animation-delay: 760ms;
+  transform: rotate(0.8deg);
+  background: linear-gradient(180deg, #ffb469 0%, #ffd9a3 55%, #7d8f5a 55%, #66794c 100%);
+}
+.lp-intro-art {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.lp-intro-caption {
+  position: relative;
+  background: var(--lp-paper);
+  border: 2px solid var(--lp-ink);
+  padding: 9px 11px;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  box-shadow: var(--lp-lift-small);
+}
+.lp-intro-no {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  background: var(--lp-ink);
+  color: var(--lp-paper);
+  font-weight: 700;
+  border-radius: 50%;
+}
+.lp-intro-foot {
+  width: min(940px, 100%);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--lp-space-4);
+  margin-top: var(--lp-space-5);
+  flex-wrap: wrap;
+}
+.lp-intro-foot .lp-btn {
+  min-width: 220px;
+}
+@media (max-width: 720px) {
+  .lp-intro-page {
+    grid-template-columns: 1fr;
+  }
+  .lp-intro-panel {
+    min-height: 120px;
+    transform: none !important;
+  }
+}
+
+/* ── HUD ─────────────────────────────────────────────────────────────────── */
+.lp-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-size: calc(16px * var(--lp-ui-scale));
+}
+.lp-chip {
+  background: var(--lp-paper);
+  border: 2.5px solid var(--lp-ink);
+  box-shadow: var(--lp-lift-small);
+  color: var(--lp-ink);
+}
+
+/* Objective: top left, a caption box. */
+.lp-objective {
+  position: absolute;
+  top: calc(14px + env(safe-area-inset-top));
+  left: calc(14px + env(safe-area-inset-left));
+  max-width: min(310px, 46vw);
+  padding: 9px 13px 10px 13px;
+  transform: rotate(-0.8deg);
+  transition:
+    opacity var(--lp-slow) var(--lp-ease),
+    transform var(--lp-slow) var(--lp-pop);
+}
+.lp-objective[data-hidden="true"] {
+  opacity: 0;
+  transform: translateX(-12px) rotate(-0.8deg);
+}
+.lp-objective-kicker {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--lp-seal);
+}
+.lp-objective-title {
+  font-weight: 700;
+  font-size: 1.02rem;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+.lp-objective-hint {
+  font-size: 0.82rem;
+  color: var(--lp-ink-soft);
+  line-height: 1.35;
+  margin-top: 3px;
+}
+.lp-objective-flash {
+  animation: lp-flash 520ms var(--lp-ease);
+}
+@keyframes lp-flash {
+  0% {
+    background: var(--lp-lumen-bright);
+  }
+  100% {
+    background: var(--lp-paper);
+  }
+}
+
+/* Compass: top centre. */
+.lp-compass {
+  position: absolute;
+  top: calc(14px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 8px;
+  border-radius: 999px;
+  transition: opacity var(--lp-slow) var(--lp-ease);
+}
+.lp-compass[data-hidden="true"] {
+  opacity: 0;
+}
+.lp-compass-needle {
+  line-height: 0;
+  transition: transform 120ms ease;
+}
+.lp-compass-label {
   font-size: 0.78rem;
-  letter-spacing: 0.02em;
-  margin-top: var(--lp-space-4);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Journal chip: top right. */
+.lp-rank {
+  position: absolute;
+  top: calc(14px + env(safe-area-inset-top));
+  right: calc(14px + env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 11px 5px 6px;
+  transform: rotate(0.8deg);
+  pointer-events: auto;
+  cursor: pointer;
+  font: inherit;
+}
+.lp-rank-seal {
+  font-size: 0.82rem;
+}
+.lp-rank-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.lp-rank-count {
+  font-size: 0.7rem;
+  color: var(--lp-ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+.lp-rank-bar {
+  height: 5px;
+  width: 92px;
+  margin-top: 3px;
+  background: var(--lp-paper-shade);
+  border: 1.5px solid var(--lp-ink);
+}
+.lp-rank-bar i {
+  display: block;
+  height: 100%;
+  background: var(--lp-seal);
+  transition: width 600ms var(--lp-ease);
+}
+
+/* Interaction prompt: a small speech bubble at the centre. */
+.lp-prompt {
+  position: absolute;
+  left: 50%;
+  top: 60%;
+  transform: translate(-50%, -50%) scale(0.8);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px 7px 9px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.92rem;
+  opacity: 0;
+  transition:
+    opacity 130ms ease,
+    transform 150ms var(--lp-pop);
+}
+.lp-prompt[data-shown="true"] {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* District banner: a vertical title strip, as on a chapter page. */
+.lp-district {
+  position: absolute;
+  left: 50%;
+  top: 26%;
+  transform: translate(-50%, 0) rotate(-2deg) scale(0.92);
+  padding: 8px 22px 9px;
+  background: var(--lp-ink);
+  color: var(--lp-paper);
+  border: 3px solid var(--lp-paper);
+  box-shadow: 6px 6px 0 var(--lp-seal);
+  font: 700 clamp(22px, 3.2vw, 34px) / 1 var(--lp-font-display);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  opacity: 0;
+  transition:
+    opacity 380ms ease,
+    transform 420ms var(--lp-pop);
+}
+.lp-district[data-shown="true"] {
+  opacity: 1;
+  transform: translate(-50%, 0) rotate(-2deg) scale(1);
+}
+.lp-district small {
+  display: block;
+  font-size: 0.36em;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--lp-lumen-bright);
+  margin-bottom: 4px;
+}
+
+/* Parcel warmth: bottom left. */
+.lp-parcel {
+  position: absolute;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  left: calc(18px + env(safe-area-inset-left));
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid var(--lp-ink);
+  box-shadow: var(--lp-lift-small);
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition:
+    background 400ms ease,
+    opacity 250ms ease;
+}
+.lp-parcel[data-shown="true"] {
+  opacity: 1;
+}
+
+/* Timed course: a stopwatch card under the compass. */
+.lp-course {
+  position: absolute;
+  top: calc(60px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%) rotate(-1deg);
+  padding: 6px 16px 7px;
+  text-align: center;
+  opacity: 0;
+  transition: opacity var(--lp-fast) ease;
+}
+.lp-course[data-shown="true"] {
+  opacity: 1;
+}
+.lp-course-time {
+  font-weight: 700;
+  font-size: 1.5rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.lp-course-gates {
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lp-ink-soft);
+  margin-top: 3px;
+}
+
+/* A find: the card that slides in when something goes into the journal. */
+.lp-found {
+  position: absolute;
+  left: 50%;
+  bottom: calc(110px + env(safe-area-inset-bottom));
+  transform: translate(-50%, 16px) rotate(-1deg);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(420px, calc(100vw - 32px));
+  padding: 12px 16px;
+  opacity: 0;
+  transition:
+    opacity var(--lp-slow) ease,
+    transform var(--lp-slow) var(--lp-pop);
+}
+.lp-found[data-shown="true"] {
+  opacity: 1;
+  transform: translate(-50%, 0) rotate(-1deg);
+}
+/* Speed lines behind the card, as when a manga panel shouts. */
+.lp-found::before {
+  content: "";
+  position: absolute;
+  inset: -34px -60px;
+  z-index: -1;
+  background: repeating-conic-gradient(from 0deg, rgba(34, 28, 43, 0.5) 0deg 1.2deg, transparent 1.2deg 7deg);
+  -webkit-mask: radial-gradient(ellipse at center, transparent 44%, #000 72%);
+  mask: radial-gradient(ellipse at center, transparent 44%, #000 72%);
+  opacity: 0.6;
+}
+.lp-found-kicker {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--lp-seal);
+}
+.lp-found-title {
+  font-weight: 700;
+  font-size: 1.12rem;
+  line-height: 1.15;
+}
+.lp-found-note {
+  font-size: 0.82rem;
+  color: var(--lp-ink-soft);
+  line-height: 1.35;
+  margin-top: 2px;
+}
+
+/* Controls reminder, bottom centre, for the first minute. */
+.lp-controls {
+  position: absolute;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 14px;
+  padding: 7px 14px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: opacity 600ms ease;
+}
+.lp-controls[data-hidden="true"] {
+  opacity: 0;
+}
+.lp-controls span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+@media (max-width: 760px), (pointer: coarse) {
+  .lp-controls {
+    display: none;
+  }
+}
+
+/* Toasts. */
+.lp-toasts {
+  position: absolute;
+  top: calc(70px + env(safe-area-inset-top));
+  right: calc(14px + env(safe-area-inset-right));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+.lp-toast {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 12px;
+  font-weight: 600;
+  font-size: 0.86rem;
+  opacity: 0;
+  transform: translateX(14px) rotate(0.6deg);
+  transition:
+    opacity var(--lp-fast) var(--lp-ease),
+    transform var(--lp-fast) var(--lp-pop);
+}
+.lp-toast[data-shown="true"] {
+  opacity: 1;
+  transform: rotate(0.6deg);
+}
+
+/* ── dialogue: a speech bubble, with a tail ──────────────────────────────── */
+.lp-dialogue {
+  position: absolute;
+  left: 50%;
+  bottom: calc(26px + env(safe-area-inset-bottom));
+  transform: translateX(-50%) translateY(12px);
+  width: min(600px, calc(100vw - 36px));
+  padding: 18px 22px 20px;
+  background: var(--lp-paper);
+  border: var(--lp-outline-w) solid var(--lp-ink);
+  border-radius: 26px;
+  box-shadow: var(--lp-lift);
+  pointer-events: auto;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 200ms ease,
+    transform 220ms var(--lp-pop);
+}
+.lp-dialogue[data-shown="true"] {
+  opacity: 1;
+  transform: translateX(-50%);
+}
+.lp-dialogue::before,
+.lp-dialogue::after {
+  content: "";
+  position: absolute;
+  left: 64px;
+  border-style: solid;
+}
+.lp-dialogue::before {
+  top: -22px;
+  border-width: 0 13px 22px 13px;
+  border-color: transparent transparent var(--lp-ink) transparent;
+}
+.lp-dialogue::after {
+  top: -15px;
+  margin-left: 4px;
+  border-width: 0 9px 17px 9px;
+  border-color: transparent transparent var(--lp-paper) transparent;
+}
+.lp-dialogue-speaker {
+  position: absolute;
+  top: -16px;
+  left: 104px;
+  padding: 3px 11px;
+  background: var(--lp-ink);
+  color: var(--lp-paper);
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  transform: rotate(-1.5deg);
+}
+.lp-dialogue-body {
+  margin: 0;
+  font-size: 1.06rem;
+  line-height: 1.5;
+  min-height: 3em;
+}
+.lp-dialogue-next {
+  position: absolute;
+  right: 18px;
+  bottom: 9px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--lp-ink-soft);
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+.lp-dialogue-next[data-shown="true"] {
+  opacity: 1;
+  animation: lp-nudge 900ms ease-in-out infinite;
+}
+@keyframes lp-nudge {
+  50% {
+    transform: translateY(3px);
+  }
+}
+
+/* ── journal ─────────────────────────────────────────────────────────────── */
+.lp-journal {
+  width: min(880px, calc(100vw - 48px));
+  max-width: none;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  max-height: min(680px, calc(100vh - 40px));
+  overflow: hidden;
+}
+.lp-journal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--lp-space-4);
+  flex-wrap: wrap;
+}
+.lp-journal-rank {
+  text-align: right;
+  font-size: 0.82rem;
+  color: var(--lp-ink-soft);
+}
+.lp-journal-rank b {
+  display: block;
+  font-size: 1.05rem;
+  color: var(--lp-ink);
+}
+.lp-tabs {
+  display: flex;
+  gap: 6px;
+  margin: var(--lp-space-4) 0 0;
+  border-bottom: var(--lp-outline-w) solid var(--lp-ink);
+  flex-wrap: wrap;
+}
+.lp-tab {
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--lp-ink-soft);
+  background: var(--lp-paper-warm);
+  border: 2.5px solid var(--lp-ink);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  padding: 8px 14px 7px;
+  margin-bottom: -3px;
+  cursor: pointer;
+}
+.lp-tab[aria-selected="true"] {
+  background: var(--lp-paper);
+  color: var(--lp-ink);
+  padding-bottom: 10px;
+}
+.lp-tab:focus-visible {
+  outline: 3px solid var(--lp-seal);
+  outline-offset: 2px;
+}
+.lp-tab small {
+  font-weight: 600;
+  opacity: 0.7;
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.lp-journal-body {
+  overflow-y: auto;
+  padding: var(--lp-space-4) 2px var(--lp-space-2);
+  min-height: 240px;
+}
+.lp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+}
+.lp-card {
+  border: 2.5px solid var(--lp-ink);
+  background: var(--lp-paper);
+  padding: 11px 12px 12px;
+  box-shadow: var(--lp-lift-small);
+  display: grid;
+  gap: 5px;
+  align-content: start;
+}
+.lp-card:nth-child(odd) {
+  transform: rotate(-0.5deg);
+}
+.lp-card:nth-child(even) {
+  transform: rotate(0.5deg);
+}
+.lp-card[data-missing="true"] {
+  background: var(--lp-tone-light), var(--lp-paper-warm);
+  box-shadow: none;
+  border-style: dashed;
+  color: var(--lp-ink-soft);
+}
+.lp-card-title {
+  font-weight: 700;
+  line-height: 1.2;
+}
+.lp-card-note {
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--lp-ink-soft);
+}
+.lp-card-photo {
+  aspect-ratio: 16 / 10;
+  width: 100%;
+  object-fit: cover;
+  border: 2px solid var(--lp-ink);
+  background: var(--lp-tone), var(--lp-paper-shade);
+  display: block;
+}
+.lp-steps {
+  display: grid;
+  gap: 8px;
+  counter-reset: step;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lp-step {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 12px;
+  border: 2.5px solid var(--lp-ink);
+  background: var(--lp-paper);
+}
+.lp-step::before {
+  counter-increment: step;
+  content: counter(step);
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2.5px solid var(--lp-ink);
+  font-weight: 700;
+  font-size: 0.86rem;
+}
+.lp-step[data-state="done"]::before {
+  content: "";
+  background: var(--lp-seal);
+  border-color: var(--lp-seal);
+}
+.lp-step[data-state="now"] {
+  background: var(--lp-tone-light), #fff6dc;
+  box-shadow: var(--lp-lift-small);
+}
+.lp-step[data-state="later"] {
+  color: var(--lp-ink-faint);
+  border-style: dashed;
+}
+.lp-step b {
+  display: block;
+}
+.lp-step span {
+  font-size: 0.82rem;
+  color: var(--lp-ink-soft);
+}
+.lp-step em {
+  font-style: normal;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lp-seal);
+}
+.lp-journal-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--lp-space-3);
+  padding-top: var(--lp-space-3);
+  border-top: 2px solid var(--lp-ink);
+  flex-wrap: wrap;
+}
+
+/* ── postcard camera ─────────────────────────────────────────────────────── */
+.lp-viewfinder {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+.lp-viewfinder[data-shown="true"] {
+  opacity: 1;
+}
+.lp-viewfinder-frame {
+  position: absolute;
+  inset: 9% 12%;
+  border: 3px solid var(--lp-paper);
+  outline: 2px solid var(--lp-ink);
+  box-shadow: 0 0 0 100vmax rgba(20, 23, 36, 0.38);
+}
+.lp-viewfinder-frame::before,
+.lp-viewfinder-frame::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: var(--lp-paper);
+  transform: translate(-50%, -50%);
+}
+.lp-viewfinder-frame::before {
+  width: 26px;
+  height: 2px;
+}
+.lp-viewfinder-frame::after {
+  width: 2px;
+  height: 26px;
+}
+.lp-viewfinder-tag {
+  position: absolute;
+  left: 50%;
+  top: calc(9% + 14px);
+  transform: translateX(-50%) rotate(-1deg);
+  padding: 6px 14px;
+  font-weight: 700;
+  font-size: 0.92rem;
+  white-space: nowrap;
+}
+.lp-viewfinder-tag[data-state="none"] {
+  opacity: 0.85;
+  font-weight: 500;
+}
+.lp-viewfinder-tag[data-state="new"] {
+  background: var(--lp-seal);
+  color: var(--lp-paper);
+}
+.lp-viewfinder-help {
+  position: absolute;
+  left: 50%;
+  bottom: calc(9% + 14px);
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  display: flex;
+  gap: 14px;
+}
+.lp-flash {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+.lp-flash[data-fire="true"] {
+  animation: lp-shutter 380ms ease-out;
+}
+@keyframes lp-shutter {
+  0% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ── touch controls ──────────────────────────────────────────────────────── */
+.lp-touch {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: none;
+}
+.lp-touch[data-shown="true"] {
+  display: block;
+}
+.lp-stick {
+  position: absolute;
+  width: 112px;
+  height: 112px;
+  margin: -56px 0 0 -56px;
+  border-radius: 50%;
+  border: 3px solid rgba(247, 240, 223, 0.85);
+  background: rgba(34, 28, 43, 0.28);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.lp-stick[data-shown="true"] {
+  opacity: 1;
+}
+.lp-stick i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  background: var(--lp-paper);
+  border: 3px solid var(--lp-ink);
+}
+.lp-stick-hint {
+  position: absolute;
+  left: calc(34px + env(safe-area-inset-left));
+  bottom: calc(40px + env(safe-area-inset-bottom));
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 3px dashed rgba(247, 240, 223, 0.6);
+  display: grid;
+  place-items: center;
+  color: rgba(247, 240, 223, 0.85);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 var(--lp-ink);
+}
+.lp-touch-buttons {
+  position: absolute;
+  /* Left of the dial, not on top of it. */
+  right: calc(180px + env(safe-area-inset-right));
+  bottom: calc(22px + env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: repeat(3, 62px);
+  gap: 12px;
+  pointer-events: auto;
+}
+.lp-touch-btn {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  border: 3px solid var(--lp-ink);
+  background: var(--lp-paper);
+  color: var(--lp-ink);
+  box-shadow: var(--lp-lift-small);
+  font: 700 0.72rem/1 var(--lp-font-body);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.lp-touch-btn:active,
+.lp-touch-btn[data-down="true"] {
+  transform: translate(2px, 2px);
+  box-shadow: var(--lp-lift-pressed);
+  background: var(--lp-paper-shade);
+}
+.lp-touch-btn--main {
+  background: var(--lp-seal);
+  color: var(--lp-paper);
+}
+.lp-touch-top {
+  position: absolute;
+  top: calc(64px + env(safe-area-inset-top));
+  right: calc(14px + env(safe-area-inset-right));
+  display: flex;
+  gap: 10px;
+  pointer-events: auto;
+}
+.lp-touch-top .lp-touch-btn {
+  width: 46px;
+  height: 46px;
+  font-size: 0.6rem;
+}
+
+/* ── report: the festival ────────────────────────────────────────────────── */
+.lp-report-seals {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: var(--lp-space-3) 0;
+}
+.lp-pips {
+  display: flex;
+  gap: 6px;
+}
+.lp-pip {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--lp-ink);
+}
+
+/* ── small screens ───────────────────────────────────────────────────────── */
+@media (max-width: 620px) {
+  .lp-panel {
+    padding: var(--lp-space-4);
+  }
+  .lp-objective {
+    max-width: 56vw;
+  }
+  .lp-rank-title,
+  .lp-rank-bar {
+    display: none;
+  }
+  .lp-compass-label {
+    display: none;
+  }
+  .lp-compass {
+    padding: 5px 8px;
+  }
 }

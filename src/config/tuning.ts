@@ -18,6 +18,10 @@ export const tuning = {
     groundFriction: 14,
     airAccel: 6,
     jumpSpeed: 6.6,
+    /** Share of the rise kept when jump is let go early: a tap is a hop. */
+    jumpCut: 0.45,
+    /** Seconds of full rise even the shortest tap gets. */
+    minJumpTime: 0.08,
     maxFallSpeed: 32,
     /** Grace period after leaving ground during which jump still works. */
     coyoteTime: 0.12,
@@ -44,29 +48,58 @@ export const tuning = {
   },
 
   camera: {
-    armLength: 4.5,
+    /** A little further back than a portrait: the valley is the subject. */
+    armLength: 5.0,
     /** Zoom limits. 1.1 m is close enough to read a face without clipping it. */
     minArmLength: 1.1,
     maxArmLength: 8,
     /** Metres the camera must stay above the terrain under it. */
     groundClearance: 0.9,
-    glideArmLength: 6.5,
-    heightOffset: 1.5,
-    /** Critically damped spring frequency for position follow. */
-    positionOmega: 9,
-    /** Slerp rate (per second) for rotation follow. */
-    rotationLerp: 14,
-    minPitchDeg: -35,
-    maxPitchDeg: 55,
+    /**
+     * How far above her feet the camera looks: just over her head, so she
+     * stands in the lower middle of the frame and the centre is the view.
+     */
+    heightOffset: 1.7,
+    /**
+     * Where the camera starts, radians; positive looks up. A little down, from
+     * above her shoulder. It began below her looking up, which meant the lens
+     * rode the ground clearance and bobbed with every rise it passed over.
+     */
+    startPitch: -0.12,
+    /**
+     * How quickly the point the camera orbits catches the player, as the
+     * natural frequency of a critically damped spring. Along the ground it is
+     * quick — at a run she leads the frame by under half a metre and no more —
+     * and slower vertically, so a jump or a bump in the ground moves her on
+     * screen instead of bouncing the whole picture.
+     */
+    followOmega: 20,
+    followOmegaVertical: 9,
+    /** Looking down from overhead, and up from the grass. */
+    minPitchDeg: -62,
+    maxPitchDeg: 42,
+    /** Radians per pixel of mouse travel, at a look sensitivity of 1. */
     mouseSensitivity: 0.0022,
     touchSensitivity: 0.004,
-    gamepadSensitivity: 2.4,
+    /** Radians a second at full deflection of the right stick. */
+    gamepadYawSpeed: 2.7,
+    gamepadPitchSpeed: 1.7,
     fov: 55,
-    glideFov: 68,
+    /** The postcard camera's lens: longer, so a far thing fills the frame. */
+    photoFov: 38,
+    /** Degrees the lens opens at a full run. Off under reduced motion. */
+    runFovKick: 3.5,
     /** Radius of the sphere-cast used to pull the camera past obstacles. */
     occlusionRadius: 0.25,
-    /** Rate at which the arm returns to full length after an occlusion. */
-    occlusionRecoverSpeed: 6,
+    /** Rate (per second) at which the arm closes on an obstacle. */
+    occlusionPullRate: 26,
+    /** Rate (per second) at which the arm returns to full length afterwards. */
+    occlusionRecoverRate: 3.2,
+    /**
+     * Seconds something must stay between the camera and her before the
+     * camera moves for it. A lantern post crossing the view is not a wall.
+     */
+    occlusionPatience: 0.14,
   },
 
   input: {

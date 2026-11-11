@@ -301,8 +301,8 @@ describe('localisation', () => {
   });
 
   it('renders the continue line with the real contract count', () => {
-    expect(t('menu.continueDetail', { done: 3, total: CONTRACTS.length })).toBe(
-      `3 of ${CONTRACTS.length} delivered`,
+    expect(t('menu.continueDetail', { done: 3, total: CONTRACTS.length, found: 7, all: 26 })).toBe(
+      `3/${CONTRACTS.length} delivered · journal 7/26`,
     );
   });
 });

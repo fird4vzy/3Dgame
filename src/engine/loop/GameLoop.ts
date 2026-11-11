@@ -3,18 +3,23 @@ import { FIXED_DT, MAX_FRAME_TIME } from '@config/constants';
 export interface LoopCallbacks {
   /** Runs at exactly 60 Hz. Simulation only — controller, collision, quests. */
   fixedUpdate(dt: number): void;
+  /**
+   * Places everything simulated where it should be *drawn* this frame, between
+   * the last two fixed steps. `alpha` is 0..1. Runs before `update`, so every
+   * per-frame system — animation, lights, the camera — reads the same smooth
+   * transforms that are about to be rendered.
+   */
+  interpolate?(alpha: number): void;
   /** Runs once per frame at display rate. Animation, particles, lerps. */
   update(dt: number): void;
-  /** Smooths render transforms between fixed steps. `alpha` is 0..1. */
-  interpolate?(alpha: number): void;
   /** After transforms have settled. Camera follow, UI world anchors. */
   lateUpdate(dt: number): void;
   /** Draw. */
   render(): void;
   /** Roll edge-triggered input state at the very end of the frame. */
   endFrame?(): void;
-  /** Poll devices at the very start of the frame. */
-  beginFrame?(): void;
+  /** Poll devices at the very start of the frame. `dt` is the real frame time. */
+  beginFrame?(dt: number): void;
 }
 
 /**
@@ -71,7 +76,7 @@ export class GameLoop {
     this.lastTime = now;
     this.trackFrameTime(frameTime);
 
-    this.callbacks.beginFrame?.();
+    this.callbacks.beginFrame?.(frameTime);
 
     this.accumulator += frameTime;
     let ticked = false;
@@ -81,8 +86,11 @@ export class GameLoop {
       ticked = true;
     }
 
-    this.callbacks.update(frameTime);
+    // Interpolate first. It used to run after `update`, which meant everything
+    // in `update` saw the raw 60 Hz position on frames where a tick ran and
+    // last frame's smoothed one on frames where none did.
     this.callbacks.interpolate?.(this.accumulator / FIXED_DT);
+    this.callbacks.update(frameTime);
     this.callbacks.lateUpdate(frameTime);
     this.callbacks.render();
 

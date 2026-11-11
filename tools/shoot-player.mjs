@@ -62,10 +62,10 @@ const stage = (lit, heading, front, arm) =>
       s.controller.previousPosition?.copy(pos);
       s.controller.renderPosition?.copy(pos);
       s.controller.velocity?.set(0, 0, 0);
-      const fuji = s.world.scene.getObjectByName('fuji');
+      // The mountain is painted in the sky; the environment knows its bearing.
       const forward =
-        heading === 'fuji' && fuji
-          ? fuji.position.clone().sub(pos).projectOnPlane(up).normalize()
+        heading === 'fuji'
+          ? s.environment.landmarkDirection.clone().projectOnPlane(up).normalize()
           : new V(0, 1, 0).projectOnPlane(up).normalize().applyAxisAngle(up, (heading * Math.PI) / 180);
       s.player.object3D.lookAt(pos.clone().add(forward));
       s.rig.wantedArm = arm;

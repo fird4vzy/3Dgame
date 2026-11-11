@@ -21,10 +21,13 @@ const STYLE: Record<
   MarkerKind,
   { fill: string; radius: number; glow: number; alpha: number; order: number }
 > = {
-  shard: { fill: '#7ff5ee', radius: 1.5, glow: 0, alpha: 0.4, order: 0 },
-  lamp: { fill: '#e8a33a', radius: 1.4, glow: 0, alpha: 0.35, order: 1 },
-  npc: { fill: '#d8dce8', radius: 2.8, glow: 0, alpha: 0.8, order: 2 },
-  objective: { fill: '#f6bd60', radius: 6, glow: 12, alpha: 1, order: 3 },
+  shard: { fill: '#2a9d8f', radius: 1.6, glow: 0, alpha: 0.75, order: 0 },
+  lamp: { fill: '#e8a33a', radius: 1.4, glow: 0, alpha: 0.5, order: 1 },
+  souvenir: { fill: '#8a4fbf', radius: 2.6, glow: 0, alpha: 0.9, order: 2 },
+  course: { fill: '#2c3b6b', radius: 2.8, glow: 0, alpha: 0.9, order: 2 },
+  npc: { fill: '#221c2b', radius: 2.6, glow: 0, alpha: 0.75, order: 3 },
+  stamp: { fill: '#c8402f', radius: 3.2, glow: 0, alpha: 1, order: 4 },
+  objective: { fill: '#f0a52e', radius: 6, glow: 6, alpha: 1, order: 5 },
 };
 
 const _up = new THREE.Vector3();
@@ -76,10 +79,9 @@ export class Minimap {
       `height:${SIZE}px`,
       'border-radius:50%',
       'overflow:hidden',
-      'background:rgba(14,17,30,.62)',
-      'border:1px solid rgba(234,230,220,.16)',
-      'backdrop-filter:blur(6px)',
-      'box-shadow:0 8px 30px -14px rgba(0,0,0,.9)',
+      'background:rgba(247,240,223,.9)',
+      'border:3px solid #221c2b',
+      'box-shadow:4px 4px 0 #221c2b',
       'pointer-events:none',
       'transition:opacity 300ms ease',
     ].join(';');
@@ -184,7 +186,7 @@ export class Minimap {
 
   private drawDial(ctx: CanvasRenderingContext2D, c: number, litFraction: number): void {
     // Range rings at a third and two thirds, so distance is readable, not felt.
-    ctx.strokeStyle = 'rgba(234,230,220,.10)';
+    ctx.strokeStyle = 'rgba(34,28,43,.16)';
     ctx.lineWidth = 1;
     for (const t of [0.34, 0.67]) {
       ctx.beginPath();
@@ -193,7 +195,7 @@ export class Minimap {
     }
 
     // Cross hairs, brightest ahead.
-    ctx.strokeStyle = 'rgba(234,230,220,.08)';
+    ctx.strokeStyle = 'rgba(34,28,43,.12)';
     ctx.beginPath();
     ctx.moveTo(c, 8);
     ctx.lineTo(c, SIZE - 8);
@@ -202,15 +204,15 @@ export class Minimap {
     ctx.stroke();
 
     // The rim warms as the planet lights — the same signal as the sky.
-    const warmth = 0.18 + litFraction * 0.4;
-    ctx.strokeStyle = `rgba(232,163,58,${warmth.toFixed(3)})`;
-    ctx.lineWidth = 1.5;
+    const warmth = 0.25 + litFraction * 0.7;
+    ctx.strokeStyle = `rgba(240,165,46,${warmth.toFixed(3)})`;
+    ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(c, c, c - 4, 0, Math.PI * 2);
     ctx.stroke();
 
     // Forward tick, so the dial's orientation is unambiguous.
-    ctx.fillStyle = 'rgba(234,230,220,.5)';
+    ctx.fillStyle = 'rgba(34,28,43,.7)';
     ctx.beginPath();
     ctx.moveTo(c, 5);
     ctx.lineTo(c - 4, 12);
@@ -245,8 +247,14 @@ export class Minimap {
     ctx.globalAlpha = 1;
 
     if (kind === 'objective') {
-      ctx.strokeStyle = 'rgba(20,23,36,.85)';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#221c2b';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    if (kind === 'stamp') {
+      // A square, like the seal it stands for.
+      ctx.strokeStyle = '#221c2b';
+      ctx.lineWidth = 1.2;
       ctx.stroke();
     }
   }
@@ -254,9 +262,9 @@ export class Minimap {
   private drawPlayer(ctx: CanvasRenderingContext2D, c: number): void {
     // The player is always dead centre, pointing up — that is what "centred on
     // the player, rotated to the camera" means.
-    ctx.fillStyle = '#3fd0cc';
-    ctx.shadowColor = '#3fd0cc';
-    ctx.shadowBlur = 8;
+    ctx.fillStyle = '#c8402f';
+    ctx.strokeStyle = '#221c2b';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(c, c - 5.5);
     ctx.lineTo(c - 4, c + 4.5);
@@ -264,7 +272,7 @@ export class Minimap {
     ctx.lineTo(c + 4, c + 4.5);
     ctx.closePath();
     ctx.fill();
-    ctx.shadowBlur = 0;
+    ctx.stroke();
   }
 
   dispose(): void {

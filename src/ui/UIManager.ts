@@ -46,15 +46,7 @@ export class UIManager {
     this.hudLayer.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
 
     this.toastLayer = document.createElement('div');
-    this.toastLayer.style.cssText = [
-      'position:absolute',
-      'top:calc(16px + env(safe-area-inset-top))',
-      'right:calc(16px + env(safe-area-inset-right))',
-      'display:flex',
-      'flex-direction:column',
-      'gap:8px',
-      'pointer-events:none',
-    ].join(';');
+    this.toastLayer.className = 'lp-toasts';
 
     this.root.append(this.hudLayer, this.toastLayer);
     container.appendChild(this.root);
@@ -144,22 +136,9 @@ export class UIManager {
    */
   showToast(message: string, durationMs = 2500, iconName?: IconName): void {
     const toast = document.createElement('div');
-    toast.style.cssText = [
-      'display:flex',
-      'align-items:center',
-      'gap:9px',
-      'padding:10px 14px',
-      'border-radius:8px',
-      'background:rgba(28,32,50,.92)',
-      'border:1px solid var(--lp-rule)',
-      'color:var(--lp-ink)',
-      'font:500 14px/1.4 var(--lp-font-body)',
-      'opacity:0',
-      'transform:translateY(-6px)',
-      'transition:opacity var(--lp-fast) var(--lp-ease),transform var(--lp-fast) var(--lp-ease)',
-    ].join(';');
+    toast.className = 'lp-toast lp-chip';
 
-    if (iconName) toast.appendChild(icon(iconName, 16, 'var(--lp-lumen)'));
+    if (iconName) toast.appendChild(icon(iconName, 16, 'var(--lp-seal)'));
 
     // A span, not `textContent` on the toast: assigning text to the parent
     // would wipe the icon back out again.
@@ -170,17 +149,22 @@ export class UIManager {
     this.toastLayer.appendChild(toast);
 
     requestAnimationFrame(() => {
-      toast.style.opacity = '1';
-      toast.style.transform = 'translateY(0)';
+      toast.dataset.shown = 'true';
     });
     setTimeout(() => {
-      toast.style.opacity = '0';
+      toast.dataset.shown = 'false';
       setTimeout(() => toast.remove(), 220);
     }, durationMs);
   }
 
   setHudVisible(visible: boolean): void {
     this.hudLayer.style.display = visible ? '' : 'none';
+  }
+
+  /** Collapse the interface's own motion to cuts. */
+  setReduceMotion(reduce: boolean): void {
+    this.root.classList.toggle('lp-reduce-motion', reduce);
+    this.transitions.setReduceMotion(reduce);
   }
 
   setUiScale(scale: number): void {

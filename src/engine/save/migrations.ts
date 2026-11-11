@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, SAVE_VERSION, type SaveData } from './schema';
+import { DEFAULT_SETTINGS, SAVE_VERSION, emptyJournal, type SaveData } from './schema';
 
 type AnySave = Record<string, unknown>;
 
@@ -24,6 +24,15 @@ export const migrations: Record<number, (save: AnySave) => AnySave> = {
         collectedShards: Array.isArray(progress.collectedShards) ? progress.collectedShards : [],
       },
     };
+  },
+  // v2 → v3: the journal. Nothing to convert — a save from before it existed
+  // simply has an empty one, and `fill` supplies it. Two settings that were
+  // never connected to anything (camera shake, subtitles) are dropped.
+  2: (save) => {
+    const settings = { ...((save.settings ?? {}) as AnySave) };
+    delete settings.cameraShake;
+    delete settings.subtitles;
+    return { ...save, schemaVersion: 3, settings };
   },
 };
 
@@ -63,6 +72,27 @@ export function migrate(raw: AnySave): MigrationResult {
   };
 }
 
+function fillJournal(value: unknown): SaveData['progress']['journal'] {
+  const journal = (typeof value === 'object' && value !== null ? value : {}) as AnySave;
+  const strings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  const best: Record<string, number> = {};
+  if (typeof journal.courseBest === 'object' && journal.courseBest !== null) {
+    for (const [id, seconds] of Object.entries(journal.courseBest as AnySave)) {
+      if (typeof seconds === 'number' && Number.isFinite(seconds)) best[id] = seconds;
+    }
+  }
+  return {
+    ...emptyJournal(),
+    stamps: strings(journal.stamps),
+    souvenirs: strings(journal.souvenirs),
+    postcards: strings(journal.postcards),
+    catFriends: strings(journal.catFriends),
+    courseBest: best,
+    introSeen: journal.introSeen === true,
+  };
+}
+
 /**
  * Backfill anything missing with defaults.
  *
@@ -89,6 +119,7 @@ function fill(save: AnySave): SaveData {
       collectedShards: stringArray(progress.collectedShards),
       currentContract:
         typeof progress.currentContract === 'string' ? progress.currentContract : null,
+      journal: fillJournal(progress.journal),
     },
     settings: { ...DEFAULT_SETTINGS, ...(settings as object) },
     stats: {

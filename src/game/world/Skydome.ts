@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PLANET_RADIUS } from '@config/constants';
+import { FAR_COUNTRY_GLSL } from './Fuji';
 
 /**
  * What the sky looks like this frame. Owned and interpolated by
@@ -8,11 +9,17 @@ import { PLANET_RADIUS } from '@config/constants';
 export interface SkyState {
   /** The viewer's local up — the horizon is perpendicular to it. */
   up: THREE.Vector3;
-  /** The cloud deck's own frame, held steady as the player walks. */
+  /**
+   * The sky's own frame in the ground plane. Clouds, sun, mountain and ridges
+   * are all laid out in it, so they keep their places relative to each other;
+   * `Environment` carries it along with the player without ever turning it.
+   */
   tanA: THREE.Vector3;
   tanB: THREE.Vector3;
   /** Unit vector toward the sun. */
   sunDir: THREE.Vector3;
+  /** Unit vector along the ground toward the mountain. */
+  fujiDir: THREE.Vector3;
   /** Linear, HDR. Shared with the atmosphere so the two glows match. */
   sunColour: THREE.Color;
   /** Strength of the forward-scattering glow around the sun. */
@@ -27,6 +34,17 @@ export interface SkyState {
   cloudCover: number;
   cloudLit: THREE.Color;
   cloudShade: THREE.Color;
+  /** The mountain's bare flank and its snow. */
+  fujiRock: THREE.Color;
+  fujiSnow: THREE.Color;
+  ridgeFar: THREE.Color;
+  ridgeNear: THREE.Color;
+  /** Mist lying between the ranges. */
+  mistBand: THREE.Color;
+  /** The country below the ridges, where the planet's rim does not hide it. */
+  lowland: THREE.Color;
+  /** 0..1, how much air stands between here and the far country. */
+  farHaze: number;
   time: number;
 }
 
@@ -39,14 +57,13 @@ export interface SkyState {
  * in exactly one place.
  *
  * It is drawn around the *camera*, with every direction measured from it, so
- * the sun disk lands exactly where the atmosphere's sun glow says it is. (It
- * used to be measured from the planet centre, which is sixty metres away and
- * puts the sun up to ten degrees off — invisible on a gradient, glaring once
- * there is a disk and a halo to line up.)
+ * the sun disk lands exactly where the atmosphere's sun glow says it is.
  *
- * Its in-scattering term is the same expression the atmosphere adds to every
- * surface, so a hill in the haze and the sky behind it brighten toward the sun
- * together and the horizon melts instead of cutting.
+ * It is painted the way an animation background is: a clean gradient, cumulus
+ * in two flat tones with a crisp edge — piled up along the horizon, scattered
+ * overhead — and behind the planet a whole country it does not have room for:
+ * a wooded ridge, a paler one beyond it, mist between, and the mountain (see
+ * `Fuji`). None of it has parallax, because none of it should: it is far away.
  *
  * The same class renders the environment capture (`envMode`): there the disk
  * is dimmed so it does not seed a single blazing texel into every reflection,
@@ -61,15 +78,20 @@ export class Skydome {
     const geometry = new THREE.SphereGeometry(options.radius ?? PLANET_RADIUS * 5, 48, 32);
 
     this.material = new THREE.ShaderMaterial({
+      name: 'Sky',
       side: THREE.BackSide,
       depthWrite: false,
-      depthTest: false,
+      // Tested against the far plane (see the vertex shader): the sky is
+      // drawn after the world, and only where the world left a gap.
+      depthTest: true,
       fog: false,
       uniforms: {
         uUp: { value: new THREE.Vector3(0, 1, 0) },
         uTanA: { value: new THREE.Vector3(1, 0, 0) },
         uTanB: { value: new THREE.Vector3(0, 0, 1) },
         uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+        uFujiDir: { value: new THREE.Vector3(1, 0, 0) },
+        uFujiRight: { value: new THREE.Vector3(0, 0, 1) },
         uSunColour: { value: new THREE.Color(1, 1, 1) },
         uGlow: { value: 0.6 },
         uZenith: { value: new THREE.Color('#2a6bc6') },
@@ -80,6 +102,13 @@ export class Skydome {
         uCloudCover: { value: 0.45 },
         uCloudLit: { value: new THREE.Color('#ffffff') },
         uCloudShade: { value: new THREE.Color('#a9bfd9') },
+        uFujiRock: { value: new THREE.Color('#4d5f95') },
+        uFujiSnow: { value: new THREE.Color('#ffffff') },
+        uRidgeFar: { value: new THREE.Color('#7f9cc4') },
+        uRidgeNear: { value: new THREE.Color('#4d7a72') },
+        uMistBand: { value: new THREE.Color('#e9f1f6') },
+        uLowland: { value: new THREE.Color('#a8c4b4') },
+        uFarHaze: { value: 0.5 },
         uTime: { value: 0 },
         uEnvMode: { value: options.envMode ? 1 : 0 },
       },
@@ -88,7 +117,8 @@ export class Skydome {
         void main() {
           vec4 worldPosition = modelMatrix * vec4(position, 1.0);
           vViewRay = worldPosition.xyz - cameraPosition;
-          gl_Position = projectionMatrix * viewMatrix * worldPosition;
+          // On the far plane exactly, whatever the dome's radius.
+          gl_Position = (projectionMatrix * viewMatrix * worldPosition).xyww;
         }
       `,
       fragmentShader: /* glsl */ `
@@ -96,6 +126,8 @@ export class Skydome {
         uniform vec3 uTanA;
         uniform vec3 uTanB;
         uniform vec3 uSunDir;
+        uniform vec3 uFujiDir;
+        uniform vec3 uFujiRight;
         uniform vec3 uSunColour;
         uniform float uGlow;
         uniform vec3 uZenith;
@@ -106,6 +138,13 @@ export class Skydome {
         uniform float uCloudCover;
         uniform vec3 uCloudLit;
         uniform vec3 uCloudShade;
+        uniform vec3 uFujiRock;
+        uniform vec3 uFujiSnow;
+        uniform vec3 uRidgeFar;
+        uniform vec3 uRidgeNear;
+        uniform vec3 uMistBand;
+        uniform vec3 uLowland;
+        uniform float uFarHaze;
         uniform float uTime;
         uniform float uEnvMode;
 
@@ -126,27 +165,36 @@ export class Skydome {
           float d = hash(i + vec2(1.0, 1.0));
           return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
         }
-        float fbm(vec2 p) {
+        float fbm3(vec2 p) {
           float v = 0.0;
           float a = 0.5;
-          for (int i = 0; i < 5; i++) {
+          for (int i = 0; i < 3; i++) {
             v += a * noise(p);
             p = p * 2.03 + vec2(17.1, 9.7);
             a *= 0.5;
           }
-          return v;
+          return v / 0.875;
+        }
+        // Cauliflower rather than cotton wool: round lumps with a crease
+        // between them, which is what a cumulus edge is made of.
+        float billow3(vec2 p) {
+          float v = 0.0;
+          float a = 0.5;
+          for (int i = 0; i < 3; i++) {
+            v += a * abs(noise(p) * 2.0 - 1.0);
+            p = p * 2.11 + vec2(5.3, 12.9);
+            a *= 0.5;
+          }
+          return v / 0.875;
         }
 
-        // Cloud density along a direction, 0..1, on a deck above the viewer.
-        float clouds(vec2 uv) {
-          vec2 drift = vec2(uTime * 0.004, uTime * 0.0016);
-          // Round blobs first — cumulus are blobs — then a finer edge that only
-          // bites where the blob is already thin.
-          float shape = fbm(uv * 0.55 + drift);
-          float detail = fbm(uv * 2.4 - drift * 1.6 + 4.2);
-          float d = shape + (detail - 0.5) * 0.22;
-          float threshold = 1.0 - uCloudCover;
-          return smoothstep(threshold - 0.04, threshold + 0.16, d);
+        ${FAR_COUNTRY_GLSL}
+
+        // How much cloud lies along a point of the upper sky.
+        float cloudField(vec2 p) {
+          vec2 warp = vec2(noise(p * 1.3 + 4.1), noise(p * 1.3 - 7.7)) - 0.5;
+          p += warp * 0.6;
+          return fbm3(p * 0.8) * 0.74 + billow3(p * 2.7) * 0.36;
         }
 
         void main() {
@@ -154,54 +202,89 @@ export class Skydome {
           float h = dot(dir, uUp);
           float sun = max(dot(dir, uSunDir), 0.0);
           float t = max(h, 0.0);
+          vec2 flat2 = vec2(dot(dir, uTanA), dot(dir, uTanB));
+          vec2 around = normalize(flat2 + 1e-5);
+          vec2 toSun = normalize(vec2(dot(uSunDir, uTanA), dot(uSunDir, uTanB)) + 1e-4);
 
           // Horizon to zenith, with the change sitting low in the frame.
-          vec3 sky = mix(uHorizon, uMid, smoothstep(0.0, 0.35, pow(t, 0.8)));
-          sky = mix(sky, uZenith, smoothstep(0.28, 1.0, t));
+          vec3 sky = mix(uHorizon, uMid, smoothstep(0.0, 0.34, pow(t, 0.78)));
+          sky = mix(sky, uZenith, smoothstep(0.26, 1.0, t));
+          // Every long sight-line ends in the same air the ground fades into.
+          sky = mix(sky, uHaze, exp(-t * 10.0) * 0.8);
+          vec3 clear = sky;
+          float covered = 0.0;
 
-          // The air between here and the horizon: every long sight-line ends in
-          // the same haze the fog gives the ground, so the two meet without a
-          // seam.
-          sky = mix(sky, uHaze, exp(-t * 9.0));
+          // ── cumulus standing along the horizon ─────────────────────────
+          // Laid out by bearing and height, not on a ceiling, so they stand
+          // upright: a flat cloud deck seen edge-on is a row of streaks.
+          if (h > -0.12 && h < 0.5) {
+            float turn = uTime * 0.0011;
+            vec2 ring = mat2(cos(turn), -sin(turn), sin(turn), cos(turn)) * around;
+            float mass = fbm3(ring * 2.1 + 2.3);
+            float stands = smoothstep(0.60 - uCloudCover * 0.42, 0.74 - uCloudCover * 0.36, mass);
+            float crown = fbm3(ring * 5.2 + 9.0);
+            float top = 0.05 + stands * (0.14 + crown * 0.30);
+            float lumps = billow3(ring * (8.5 * (1.0 + h * 1.3)) + 3.0);
+            float body = (top - h) + (lumps - 0.42) * 0.13;
+            float density = smoothstep(0.0, 0.022, body) * stands;
+            if (density > 0.001) {
+              float within = clamp(h / max(top, 0.02), 0.0, 1.0);
+              // Lit from above and from the sun's side; flat-toned, with one
+              // crisp step between light and shade.
+              float side = dot(around, toSun) * 0.16;
+              float lit = smoothstep(0.40, 0.46, within + (lumps - 0.42) * 0.9 + side);
+              vec3 tower = mix(uCloudShade, uCloudLit, lit);
+              tower += uSunColour * pow(sun, 6.0) * 0.10;
+              // The foot of every tower stands in the horizon's haze.
+              tower = mix(tower, uHaze, smoothstep(0.10, -0.03, h) * 0.75);
+              sky = mix(sky, tower, density);
+              covered = max(covered, density);
+            }
+          }
 
-          if (h > 0.01) {
-            float layer = 700.0;
-            vec3 hit = dir * (layer / h);
-            vec2 uv = vec2(dot(hit, uTanA), dot(hit, uTanB)) * 0.0014;
-
-            float density = clouds(uv);
-            // Where the deck thickens toward the sun the pixel is in its own
-            // shadow; where it thins toward the sun, light gets through.
-            vec2 toSun = normalize(vec2(dot(uSunDir, uTanA), dot(uSunDir, uTanB)) + 1e-4);
-            float towardSun = clouds(uv + toSun * 0.06);
-            float lit = smoothstep(-0.35, 0.35, density - towardSun);
-
-            vec3 cloud = mix(uCloudShade, uCloudLit, lit);
-            // Silver lining: thin cloud near the sun is lit through.
-            cloud += uSunColour * pow(sun, 5.0) * (1.0 - density) * 0.6;
-            // Distant cloud is seen through more air.
-            cloud = mix(cloud, uHaze, exp(-t * 5.0) * 0.7);
-
-            float horizonFade = smoothstep(0.02, 0.24, h);
-            float zenithThin = 1.0 - smoothstep(0.75, 1.0, h) * 0.35;
-            sky = mix(sky, cloud, density * horizonFade * zenithThin * 0.95);
+          // ── scattered cumulus overhead ─────────────────────────────────
+          if (h > 0.08) {
+            // A dome, not a plane: without the offset everything toward the
+            // horizon is squeezed thin.
+            vec2 uv = flat2 / (h + 0.24);
+            vec2 drift = vec2(uTime * 0.0030, uTime * 0.0011);
+            vec2 p = uv * 1.15 + drift;
+            float threshold = mix(0.84, 0.52, uCloudCover);
+            float d0 = cloudField(p);
+            float density = smoothstep(threshold, threshold + 0.022, d0);
+            if (density > 0.001) {
+              float d1 = cloudField(p + toSun * 0.13);
+              float lit = smoothstep(-0.015, 0.03, d0 - d1);
+              float thick = smoothstep(threshold + 0.10, threshold + 0.30, d0);
+              vec3 cloud = mix(uCloudShade, uCloudLit, max(lit, 1.0 - thick * 0.9));
+              cloud = mix(cloud, uCloudShade, thick * (1.0 - lit) * 0.9);
+              // Silver lining: thin cloud near the sun is lit through.
+              cloud += uSunColour * pow(sun, 5.0) * (1.0 - thick) * 0.22;
+              float reach = smoothstep(0.08, 0.22, h);
+              density *= reach;
+              sky = mix(sky, cloud, density);
+              covered = max(covered, density);
+            }
           }
 
           // In-scattering toward the sun — the identical expression to the
           // atmosphere's, so hills and sky warm together.
-          sky += uSunColour * (pow(sun, 8.0) * 0.55 + pow(sun, 48.0) * 0.45) * uGlow;
+          float veil = 1.0 - covered * 0.7;
+          sky += uSunColour * (pow(sun, 8.0) * 0.55 + pow(sun, 48.0) * 0.45) * uGlow * veil;
 
-          // The disk, with a soft limb. Bright enough to bloom into the halo the
-          // eye expects; dimmed in the capture so reflections do not sparkle.
+          // The disk, with a soft limb. Bright enough to bloom into the halo
+          // the eye expects; dimmed in the capture so reflections do not
+          // sparkle.
           float disk = smoothstep(0.99962, 0.99988, sun);
-          sky += uSunColour * disk * mix(36.0, 2.0, uEnvMode);
+          sky += uSunColour * disk * mix(30.0, 2.0, uEnvMode) * (1.0 - covered);
 
-          // Below the horizon: in play the planet covers it, but a sliver shows
-          // from hilltops and it should read as distant ground. In the capture
-          // it is the ground the bounce light comes from.
-          float below = smoothstep(0.0, -0.1, h);
-          vec3 low = mix(mix(uHaze, uGround, 0.55), uGround, uEnvMode);
-          sky = mix(sky, low, below);
+          if (uEnvMode > 0.5) {
+            // The capture lights the scene: below the horizon is the ground
+            // the bounce comes from.
+            sky = mix(sky, uGround, smoothstep(0.0, -0.1, h));
+          } else if (h < 0.3) {
+            sky = farCountry(dir, h, sky, clear);
+          }
 
           gl_FragColor = vec4(sky, 1.0);
         }
@@ -210,27 +293,43 @@ export class Skydome {
 
     this.mesh = new THREE.Mesh(geometry, this.material);
     this.mesh.name = options.envMode ? 'skydome_capture' : 'skydome';
-    // Drawn first, never culled — it surrounds everything.
-    this.mesh.renderOrder = -1000;
+    // Drawn after everything solid, never culled. It used to be drawn first,
+    // with no depth test, so its shader — the most expensive per pixel in the
+    // game — ran for every pixel of the screen and was then painted over by
+    // the ground, the houses and the trees.
+    this.mesh.renderOrder = 1000;
     this.mesh.frustumCulled = false;
   }
 
   apply(state: SkyState): void {
     const u = this.material.uniforms;
-    (u.uUp!.value as THREE.Vector3).copy(state.up).normalize();
-    (u.uTanA!.value as THREE.Vector3).copy(state.tanA);
-    (u.uTanB!.value as THREE.Vector3).copy(state.tanB);
-    (u.uSunDir!.value as THREE.Vector3).copy(state.sunDir);
-    (u.uSunColour!.value as THREE.Color).copy(state.sunColour);
+    const vector = (name: string): THREE.Vector3 => u[name]!.value as THREE.Vector3;
+    const colour = (name: string): THREE.Color => u[name]!.value as THREE.Color;
+
+    vector('uUp').copy(state.up).normalize();
+    vector('uTanA').copy(state.tanA);
+    vector('uTanB').copy(state.tanB);
+    vector('uSunDir').copy(state.sunDir);
+    vector('uFujiDir').copy(state.fujiDir);
+    // Screen-right of the mountain as you face it.
+    vector('uFujiRight').crossVectors(state.fujiDir, state.up).normalize();
+    colour('uSunColour').copy(state.sunColour);
     u.uGlow!.value = state.glow;
-    (u.uZenith!.value as THREE.Color).copy(state.zenith);
-    (u.uMid!.value as THREE.Color).copy(state.mid);
-    (u.uHorizon!.value as THREE.Color).copy(state.horizon);
-    (u.uHaze!.value as THREE.Color).copy(state.haze);
-    (u.uGround!.value as THREE.Color).copy(state.ground);
+    colour('uZenith').copy(state.zenith);
+    colour('uMid').copy(state.mid);
+    colour('uHorizon').copy(state.horizon);
+    colour('uHaze').copy(state.haze);
+    colour('uGround').copy(state.ground);
     u.uCloudCover!.value = state.cloudCover;
-    (u.uCloudLit!.value as THREE.Color).copy(state.cloudLit);
-    (u.uCloudShade!.value as THREE.Color).copy(state.cloudShade);
+    colour('uCloudLit').copy(state.cloudLit);
+    colour('uCloudShade').copy(state.cloudShade);
+    colour('uFujiRock').copy(state.fujiRock);
+    colour('uFujiSnow').copy(state.fujiSnow);
+    colour('uRidgeFar').copy(state.ridgeFar);
+    colour('uRidgeNear').copy(state.ridgeNear);
+    colour('uMistBand').copy(state.mistBand);
+    colour('uLowland').copy(state.lowland);
+    u.uFarHaze!.value = state.farHaze;
     u.uTime!.value = state.time;
   }
 

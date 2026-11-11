@@ -1,18 +1,27 @@
 import type { EventBus } from '@core/events/EventBus';
 import type { SettingsManager } from '@engine/settings/SettingsManager';
+import { t } from '@engine/i18n/Localization';
 import type { UIScreen } from '../UIManager';
+import { settingsControls } from './SettingsScreen';
 
-interface PauseStats {
+export interface PauseStats {
   elapsedSeconds: number;
-  contractsComplete: number;
+  delivered: number;
+  deliveries: number;
   shards: number;
+  shardTotal: number;
+  journal: number;
+  journalTotal: number;
+  rank: string;
 }
 
 /**
- * Pause overlay with inline settings.
+ * Pause overlay with the settings inline.
  *
  * An overlay, not a scene replacement — the frozen world stays visible and
- * loaded behind the blur, which is why the scene manager is a stack.
+ * loaded behind the paper. The line under the title is the run as it stands;
+ * it used to read "0/5 delivered · 0/24 shards" whatever had happened, because
+ * nothing ever told it otherwise.
  */
 export class PauseScreen implements UIScreen {
   readonly id = 'pause';
@@ -25,8 +34,6 @@ export class PauseScreen implements UIScreen {
 
   render(): HTMLElement {
     const root = document.createElement('div');
-    root.style.placeContent = 'center';
-    root.style.justifyItems = 'center';
 
     const scrim = document.createElement('div');
     scrim.className = 'lp-scrim';
@@ -36,7 +43,7 @@ export class PauseScreen implements UIScreen {
     panel.className = 'lp-panel';
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-modal', 'true');
-    panel.setAttribute('aria-label', 'Paused');
+    panel.setAttribute('aria-label', t('pause.title'));
 
     const stats = this.getStats();
     const minutes = Math.floor(stats.elapsedSeconds / 60);
@@ -44,38 +51,38 @@ export class PauseScreen implements UIScreen {
 
     const title = document.createElement('h2');
     title.className = 'lp-title';
-    title.textContent = 'Paused';
+    title.textContent = t('pause.title');
 
     const sub = document.createElement('p');
     sub.className = 'lp-sub';
-    sub.textContent =
-      `${minutes}:${String(seconds).padStart(2, '0')} · ` +
-      `${stats.contractsComplete}/5 delivered · ${stats.shards}/24 shards`;
+    sub.textContent = t('pause.stats', {
+      rank: stats.rank,
+      time: `${minutes}:${String(seconds).padStart(2, '0')}`,
+      delivered: stats.delivered,
+      deliveries: stats.deliveries,
+      shards: stats.shards,
+      shardTotal: stats.shardTotal,
+      journal: stats.journal,
+      journalTotal: stats.journalTotal,
+    });
 
-    const actions = document.createElement('div');
-    actions.className = 'lp-actions';
-    actions.append(
-      this.button('Resume', () => this.bus.emit('ui:requestResume'), true),
-      this.slider('Master volume', this.settings.get().masterVolume, (v) =>
-        this.settings.set('masterVolume', v),
-      ),
-      this.slider('Music', this.settings.get().musicVolume, (v) =>
-        this.settings.set('musicVolume', v),
-      ),
-      this.slider('Sound effects', this.settings.get().sfxVolume, (v) =>
-        this.settings.set('sfxVolume', v),
-      ),
-      this.toggle('Reduce motion', this.settings.get().reduceMotion, (v) =>
-        this.settings.set('reduceMotion', v),
-      ),
-      this.button('Quit to menu', () => this.bus.emit('ui:requestQuit')),
+    const top = document.createElement('div');
+    top.className = 'lp-actions';
+    top.append(
+      this.button(t('pause.resume'), () => this.bus.emit('ui:requestResume'), true),
+      this.button(t('pause.journal'), () => this.bus.emit('ui:requestJournal')),
     );
+
+    const bottom = document.createElement('div');
+    bottom.className = 'lp-actions';
+    bottom.style.marginTop = 'var(--lp-space-4)';
+    bottom.append(this.button(t('pause.quit'), () => this.bus.emit('ui:requestQuit')));
 
     const hint = document.createElement('p');
     hint.className = 'lp-hint';
-    hint.textContent = 'Esc or Start to resume · WASD move · Shift run · Space jump';
+    hint.textContent = t('pause.hint');
 
-    panel.append(title, sub, actions, hint);
+    panel.append(title, sub, top, ...settingsControls(this.bus, this.settings), bottom, hint);
     root.appendChild(panel);
     return root;
   }
@@ -93,57 +100,5 @@ export class PauseScreen implements UIScreen {
     button.textContent = label;
     button.addEventListener('click', onClick);
     return button;
-  }
-
-  private slider(
-    label: string,
-    value: number,
-    onInput: (value: number) => void,
-  ): HTMLElement {
-    const row = document.createElement('div');
-    row.className = 'lp-row';
-
-    const id = `set_${label.replace(/\s+/g, '_').toLowerCase()}`;
-    const text = document.createElement('label');
-    text.textContent = label;
-    text.htmlFor = id;
-
-    const input = document.createElement('input');
-    input.type = 'range';
-    input.id = id;
-    input.min = '0';
-    input.max = '1';
-    input.step = '0.05';
-    input.value = String(value);
-    input.addEventListener('input', () => onInput(Number(input.value)));
-
-    row.append(text, input);
-    return row;
-  }
-
-  private toggle(
-    label: string,
-    value: boolean,
-    onChange: (value: boolean) => void,
-  ): HTMLElement {
-    const row = document.createElement('div');
-    row.className = 'lp-row';
-
-    const id = `set_${label.replace(/\s+/g, '_').toLowerCase()}`;
-    const text = document.createElement('label');
-    text.textContent = label;
-    text.htmlFor = id;
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = id;
-    input.checked = value;
-    input.style.accentColor = 'var(--lp-lumen)';
-    input.style.width = '20px';
-    input.style.height = '20px';
-    input.addEventListener('change', () => onChange(input.checked));
-
-    row.append(text, input);
-    return row;
   }
 }

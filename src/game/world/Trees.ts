@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import { NO_INK } from '@engine/render/InkEffect';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { makeRng } from '@core/math/rng';
 import { applyAtmosphere, atmosphereUniforms } from '@engine/render/Atmosphere';
-import { createWorldMaterial } from '@engine/render/WorldMaterial';
+import { createWorldMaterial, toonGradient } from '@engine/render/WorldMaterial';
 import type { QualityTier } from '@engine/platform/Viewport';
 
 /**
@@ -472,23 +473,19 @@ export function updateTrees(dt: number): void {
   treeUniforms.uTreeTime.value += dt;
 }
 
-const foliageMaterials = new Map<string, THREE.MeshStandardMaterial>();
+const foliageMaterials = new Map<string, THREE.MeshToonMaterial>();
 
-function foliageMaterial(style: SpeciesStyle, tier: QualityTier): THREE.MeshStandardMaterial {
+function foliageMaterial(style: SpeciesStyle, tier: QualityTier): THREE.MeshToonMaterial {
   const key = `${style.leaf}:${tier}`;
   const cached = foliageMaterials.get(key);
   if (cached) return cached;
 
-  const material = new THREE.MeshStandardMaterial({
+  const material = new THREE.MeshToonMaterial({
     map: leafTexture(style.leaf),
     vertexColors: true,
     alphaTest: 0.5,
-    // With MSAA on, coverage from alpha gives soft leaf edges instead of a
-    // stair-stepped cut-out. The low tier has no MSAA to give coverage to.
-    alphaToCoverage: tier !== 'low',
     side: THREE.DoubleSide,
-    roughness: 0.82,
-    metalness: 0,
+    gradientMap: toonGradient(),
   });
   material.name = `foliage_${style.leaf}`;
 
@@ -556,6 +553,7 @@ function foliageMaterial(style: SpeciesStyle, tier: QualityTier): THREE.MeshStan
         // Both faces of a card are the same point on the crown.
         normal = normalize(vNormal);`,
       )
+      .replace('#include <dithering_fragment>', `#include <dithering_fragment>\n${NO_INK}`)
       .replace(
         '#include <lights_fragment_end>',
         `#include <lights_fragment_end>
@@ -614,7 +612,7 @@ export function plantTrees(
   const groups: THREE.Vector3[][] = Array.from({ length: variants }, () => []);
   positions.forEach((p, i) => groups[i % variants]!.push(p));
 
-  const barkMaterial = createWorldMaterial({ color: style.bark, roughness: 0.95 });
+  const barkMaterial = createWorldMaterial({ color: style.bark });
   const leaves = foliageMaterial(style, tier);
   const meshes: THREE.InstancedMesh[] = [];
 

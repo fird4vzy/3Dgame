@@ -82,6 +82,18 @@ async function beginRun(page) {
     }
   }
   await page.waitForFunction(() => !window.__lumenpost.scene.isMenuMode, null, { timeout: 20000 });
+
+  // A new run opens on the story's first page; pass it as a player would.
+  // Clicked through the DOM: a real click here is the gesture that takes the
+  // pointer lock, and a locked pointer is not something this driver can use.
+  await page.waitForTimeout(600);
+  await page.evaluate(() => {
+    const go = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Step off the boat');
+    go?.click();
+  });
+  // These suites measure the walk and the run separately, so they hold Shift
+  // to run, the way the game played before running became the default.
+  await page.evaluate(() => window.__lumenpost.settings.set('alwaysRun', false));
   await page.waitForTimeout(700);
 }
 
@@ -181,15 +193,22 @@ const runGrounded = await groundedFraction(90);
 check('stays grounded over hills while running', runGrounded > 0.9, `${(runGrounded * 100).toFixed(0)}%`);
 
 console.log('\njumping');
-await page.keyboard.press('Space');
-await page.waitForTimeout(200);
-const mid = await read();
-// Assert she is *airborne*, not which half of the arc she is in. The apex is
-// at 367 ms (6.6 m/s against 18 m/s²), so a 200 ms sample is nominally still
-// rising — but any scheduling delay pushes it past the top and the state flips
-// to `falling`. Pinning the exact state made this fail about one run in three
-// while the behaviour under test was fine.
-check('leaves the ground', !mid.grounded && mid.state !== 'idle', mid.state);
+// Held, not tapped: a tap is a hop now (the rise is cut on release).
+//
+// Counted by the event, with the listener installed and confirmed *before*
+// the key goes down. At the few frames a second this suite runs at, the page
+// is busy drawing for a quarter of a second at a time: a state read a moment
+// later can land on either side of the whole jump, and a listener installed
+// in the same breath as the key press can arrive after the jump has fired.
+await page.evaluate(() => {
+  window.__jumps = 0;
+  window.__lumenpost.bus.on('player:jumped', () => window.__jumps++);
+});
+await page.keyboard.down('Space');
+await page.waitForFunction(() => window.__jumps > 0, null, { timeout: 5000 }).catch(() => undefined);
+const jumps = await page.evaluate(() => window.__jumps);
+await page.keyboard.up('Space');
+check('leaves the ground', jumps === 1, `${jumps} jump(s)`);
 await page.waitForTimeout(1600);
 const landed = await read();
 check('lands again', landed.grounded, landed.state);

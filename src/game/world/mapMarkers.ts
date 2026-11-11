@@ -9,7 +9,7 @@ import type * as THREE from 'three';
  * the scene importing a type out of the HUD would be an upward dependency, and
  * the fact that a `import type` erases at runtime does not make it right.
  */
-export type MarkerKind = 'objective' | 'npc' | 'shard' | 'lamp';
+export type MarkerKind = 'objective' | 'npc' | 'shard' | 'lamp' | 'stamp' | 'souvenir' | 'course';
 
 export interface MinimapMarker {
   position: THREE.Vector3;

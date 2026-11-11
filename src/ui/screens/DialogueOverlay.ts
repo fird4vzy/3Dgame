@@ -1,80 +1,49 @@
 import type { EventBus } from '@core/events/EventBus';
 
-const CHARS_PER_SECOND = 45;
+const CHARS_PER_SECOND = 48;
 
 /**
- * Bottom-anchored dialogue card with a typewriter reveal.
+ * A speech bubble along the bottom of the frame, with a typewriter reveal.
  *
  * Not a UIScreen: dialogue must not trap focus or steal Escape, because the
  * player is still standing in the world and Escape still means pause. It is a
  * HUD-layer element that happens to accept a click.
  *
- * Tap or Space completes the current line first, then advances — never skipping
- * text the player has not seen.
+ * Tap, Space, Enter or the interact key completes the current line first, then
+ * advances — never skipping text the player has not seen.
  */
 export class DialogueOverlay {
   private readonly root: HTMLElement;
   private readonly speaker: HTMLElement;
   private readonly body: HTMLElement;
-  private readonly chevron: HTMLElement;
+  private readonly next: HTMLElement;
 
   private fullText = '';
   private revealed = 0;
   private active = false;
+  private instant = false;
 
   constructor(
     parent: HTMLElement,
     private readonly bus: EventBus,
   ) {
     this.root = document.createElement('div');
-    this.root.style.cssText = [
-      'position:absolute',
-      'left:50%',
-      'bottom:calc(28px + env(safe-area-inset-bottom))',
-      'transform:translateX(-50%) translateY(10px)',
-      'width:min(560px,calc(100vw - 40px))',
-      'padding:16px 20px',
-      'background:rgba(20,23,36,.94)',
-      'border:1px solid var(--lp-rule)',
-      'border-radius:var(--lp-radius)',
-      'box-shadow:0 18px 50px -24px rgba(0,0,0,.9)',
-      'pointer-events:auto',
-      'cursor:pointer',
-      'opacity:0',
-      'transition:opacity 220ms ease,transform 220ms ease',
-      'display:none',
-    ].join(';');
+    this.root.className = 'lp-dialogue';
+    this.root.style.display = 'none';
+    this.root.setAttribute('role', 'status');
+    this.root.setAttribute('aria-live', 'polite');
 
     this.speaker = document.createElement('div');
-    this.speaker.style.cssText = [
-      'font:650 11.5px/1 var(--lp-font-body)',
-      'letter-spacing:.12em',
-      'text-transform:uppercase',
-      'color:var(--lp-lumen)',
-      'margin-bottom:8px',
-    ].join(';');
+    this.speaker.className = 'lp-dialogue-speaker';
 
     this.body = document.createElement('p');
-    this.body.style.cssText = [
-      'margin:0',
-      'font:400 15.5px/1.55 var(--lp-font-body)',
-      'color:var(--lp-ink)',
-      'min-height:3em',
-    ].join(';');
+    this.body.className = 'lp-dialogue-body';
 
-    this.chevron = document.createElement('div');
-    this.chevron.textContent = '▾';
-    this.chevron.style.cssText = [
-      'position:absolute',
-      'right:16px;bottom:10px',
-      'color:var(--lp-lumen)',
-      'font-size:13px',
-      'opacity:0',
-      'transition:opacity 200ms ease',
-      'animation:none',
-    ].join(';');
+    this.next = document.createElement('div');
+    this.next.className = 'lp-dialogue-next';
+    this.next.textContent = 'Continue ▾';
 
-    this.root.append(this.speaker, this.body, this.chevron);
+    this.root.append(this.speaker, this.body, this.next);
     parent.appendChild(this.root);
 
     this.root.addEventListener('click', () => this.advanceOrComplete());
@@ -85,14 +54,21 @@ export class DialogueOverlay {
     this.bus.on('dialogue:ended', () => this.close());
   }
 
+  /** Show each line whole, at once, instead of typing it out. */
+  setInstant(instant: boolean): void {
+    this.instant = instant;
+  }
+
   /** Advance the typewriter. Driven from the frame loop. */
   update(dt: number): void {
     if (!this.active || this.revealed >= this.fullText.length) return;
 
-    this.revealed = Math.min(this.fullText.length, this.revealed + CHARS_PER_SECOND * dt);
+    this.revealed = this.instant
+      ? this.fullText.length
+      : Math.min(this.fullText.length, this.revealed + CHARS_PER_SECOND * dt);
     this.body.textContent = this.fullText.slice(0, Math.floor(this.revealed));
 
-    if (this.revealed >= this.fullText.length) this.chevron.style.opacity = '1';
+    if (this.revealed >= this.fullText.length) this.next.dataset.shown = 'true';
   }
 
   dispose(): void {
@@ -101,8 +77,8 @@ export class DialogueOverlay {
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
-    if (!this.active) return;
-    if (event.code === 'Space' || event.code === 'Enter') {
+    if (!this.active || event.repeat) return;
+    if (event.code === 'Space' || event.code === 'Enter' || event.code === 'KeyE' || event.code === 'KeyF') {
       event.preventDefault();
       this.advanceOrComplete();
     }
@@ -118,7 +94,7 @@ export class DialogueOverlay {
     if (this.revealed < this.fullText.length) {
       this.revealed = this.fullText.length;
       this.body.textContent = this.fullText;
-      this.chevron.style.opacity = '1';
+      this.next.dataset.shown = 'true';
       return;
     }
     this.bus.emit('ui:requestDialogueAdvance');
@@ -128,8 +104,7 @@ export class DialogueOverlay {
     this.active = true;
     this.root.style.display = '';
     requestAnimationFrame(() => {
-      this.root.style.opacity = '1';
-      this.root.style.transform = 'translateX(-50%) translateY(0)';
+      this.root.dataset.shown = 'true';
     });
   }
 
@@ -138,13 +113,12 @@ export class DialogueOverlay {
     this.fullText = text;
     this.revealed = 0;
     this.body.textContent = '';
-    this.chevron.style.opacity = '0';
+    this.next.dataset.shown = 'false';
   }
 
   private close(): void {
     this.active = false;
-    this.root.style.opacity = '0';
-    this.root.style.transform = 'translateX(-50%) translateY(10px)';
+    this.root.dataset.shown = 'false';
     setTimeout(() => {
       if (!this.active) this.root.style.display = 'none';
     }, 240);

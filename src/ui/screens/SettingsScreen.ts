@@ -4,17 +4,109 @@ import type { SettingsData } from '@engine/save/schema';
 import { t } from '@engine/i18n/Localization';
 import type { UIScreen } from '../UIManager';
 
+type NumberKey = { [K in keyof SettingsData]: SettingsData[K] extends number ? K : never }[keyof SettingsData];
+type BooleanKey = { [K in keyof SettingsData]: SettingsData[K] extends boolean ? K : never }[keyof SettingsData];
+
 /**
- * Settings, applied live.
+ * Build the settings controls. Shared by the settings screen and the pause
+ * menu, so there is one list and both always offer the same things.
  *
- * Every control writes through `SettingsManager` immediately — no Apply button.
- * A settings screen that needs confirmation makes the player guess what a
- * slider does before they can hear or see it.
- *
- * Accessibility is a top-level group in the main list, not a tab behind a
- * click: reduce motion, interface size and subtitles belong where people will
- * actually find them.
+ * Every control writes through `SettingsManager` immediately — no Apply
+ * button — and every control here does something: the two that never did
+ * (camera shake, subtitles) are gone.
  */
+export function settingsControls(bus: EventBus, settings: SettingsManager): HTMLElement[] {
+  const group = (label: string): HTMLElement => {
+    const heading = document.createElement('div');
+    heading.className = 'lp-group';
+    heading.textContent = label;
+    return heading;
+  };
+
+  const row = (labelKey: string, control: HTMLElement, id: string): HTMLElement => {
+    const element = document.createElement('div');
+    element.className = 'lp-row';
+    const label = document.createElement('label');
+    label.textContent = t(labelKey);
+    label.htmlFor = id;
+    element.append(label, control);
+    return element;
+  };
+
+  const slider = (labelKey: string, key: NumberKey, min = 0, max = 1, step = 0.05): HTMLElement => {
+    const id = `set_${key}`;
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.id = id;
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(settings.get()[key]);
+    input.addEventListener('input', () => {
+      settings.set(key, Number(input.value));
+      bus.emit('ui:settingChanged', { key, value: Number(input.value) });
+    });
+    return row(labelKey, input, id);
+  };
+
+  const toggle = (labelKey: string, key: BooleanKey): HTMLElement => {
+    const id = `set_${key}`;
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = id;
+    input.checked = settings.get()[key];
+    input.addEventListener('change', () => {
+      settings.set(key, input.checked);
+      bus.emit('ui:settingChanged', { key, value: input.checked });
+    });
+    return row(labelKey, input, id);
+  };
+
+  const quality = (): HTMLElement => {
+    const id = 'set_qualityTier';
+    const select = document.createElement('select');
+    select.id = id;
+    for (const tier of ['auto', 'low', 'medium', 'high'] as const) {
+      const option = document.createElement('option');
+      option.value = tier;
+      option.textContent = t(`settings.quality.${tier}`);
+      select.appendChild(option);
+    }
+    select.value = settings.get().qualityTier;
+    select.addEventListener('change', () => {
+      settings.set('qualityTier', select.value as SettingsData['qualityTier']);
+      note.hidden = false;
+    });
+    const wrap = document.createElement('div');
+    const note = document.createElement('p');
+    note.className = 'lp-hint';
+    note.style.margin = '0 0 8px';
+    note.textContent = t('settings.quality.note');
+    note.hidden = true;
+    wrap.append(row('settings.quality', select, id), note);
+    return wrap;
+  };
+
+  return [
+    group(t('settings.audio')),
+    slider('settings.master', 'masterVolume'),
+    slider('settings.music', 'musicVolume'),
+    slider('settings.sfx', 'sfxVolume'),
+    slider('settings.ambience', 'ambienceVolume'),
+
+    group(t('settings.controls')),
+    slider('settings.sensitivity', 'cameraSensitivity', 0.25, 3, 0.05),
+    toggle('settings.invertY', 'invertY'),
+    toggle('settings.alwaysRun', 'alwaysRun'),
+
+    group(t('settings.display')),
+    quality(),
+    toggle('settings.reduceMotion', 'reduceMotion'),
+    slider('settings.uiScale', 'uiScale', 0.8, 1.5, 0.05),
+  ];
+}
+
+/** Settings, applied live. */
 export class SettingsScreen implements UIScreen {
   readonly id = 'settings';
 
@@ -27,8 +119,6 @@ export class SettingsScreen implements UIScreen {
 
   render(): HTMLElement {
     const root = document.createElement('div');
-    root.style.placeContent = 'center';
-    root.style.justifyItems = 'center';
 
     const scrim = document.createElement('div');
     scrim.className = 'lp-scrim';
@@ -39,31 +129,11 @@ export class SettingsScreen implements UIScreen {
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-modal', 'true');
     panel.setAttribute('aria-label', t('settings.title'));
-    panel.style.maxHeight = '82vh';
-    panel.style.overflowY = 'auto';
 
     const title = document.createElement('h2');
     title.className = 'lp-title';
     title.textContent = t('settings.title');
-    panel.appendChild(title);
-
-    panel.append(
-      this.group(t('settings.audio')),
-      this.slider('settings.master', 'masterVolume'),
-      this.slider('settings.music', 'musicVolume'),
-      this.slider('settings.sfx', 'sfxVolume'),
-      this.slider('settings.ambience', 'ambienceVolume'),
-
-      this.group(t('settings.controls')),
-      this.slider('settings.sensitivity', 'cameraSensitivity', 0.25, 3, 0.05),
-      this.toggle('settings.invertY', 'invertY'),
-
-      this.group(t('settings.accessibility')),
-      this.toggle('settings.reduceMotion', 'reduceMotion'),
-      this.toggle('settings.cameraShake', 'cameraShake'),
-      this.toggle('settings.subtitles', 'subtitles'),
-      this.slider('settings.uiScale', 'uiScale', 0.8, 1.5, 0.05),
-    );
+    panel.append(title, ...settingsControls(this.bus, this.settings));
 
     const actions = document.createElement('div');
     actions.className = 'lp-actions';
@@ -79,9 +149,7 @@ export class SettingsScreen implements UIScreen {
     if (this.onResetProgress) {
       const reset = document.createElement('button');
       reset.type = 'button';
-      reset.className = 'lp-btn';
-      reset.style.borderColor = 'var(--lp-danger)';
-      reset.style.color = 'var(--lp-danger)';
+      reset.className = 'lp-btn lp-btn--danger';
       reset.textContent = t('settings.resetProgress');
       reset.addEventListener('click', () => {
         // The only irreversible action in the game, so it confirms.
@@ -98,76 +166,5 @@ export class SettingsScreen implements UIScreen {
   onBack(): boolean {
     this.onBackPressed();
     return true;
-  }
-
-  private group(label: string): HTMLElement {
-    const heading = document.createElement('div');
-    heading.textContent = label;
-    heading.style.cssText = [
-      'font-size:11px',
-      'letter-spacing:.14em',
-      'text-transform:uppercase',
-      'color:var(--lp-lumen)',
-      'font-weight:700',
-      'margin:var(--lp-space-5) 0 var(--lp-space-2)',
-      'padding-bottom:var(--lp-space-1)',
-      'border-bottom:1px solid var(--lp-rule)',
-    ].join(';');
-    return heading;
-  }
-
-  private row(labelKey: string, control: HTMLElement, id: string): HTMLElement {
-    const row = document.createElement('div');
-    row.className = 'lp-row';
-
-    const label = document.createElement('label');
-    label.textContent = t(labelKey);
-    label.htmlFor = id;
-
-    row.append(label, control);
-    return row;
-  }
-
-  private slider<K extends keyof SettingsData>(
-    labelKey: string,
-    key: K,
-    min = 0,
-    max = 1,
-    step = 0.05,
-  ): HTMLElement {
-    const id = `set_${String(key)}`;
-    const input = document.createElement('input');
-    input.type = 'range';
-    input.id = id;
-    input.min = String(min);
-    input.max = String(max);
-    input.step = String(step);
-    input.value = String(this.settings.get()[key]);
-    input.setAttribute('aria-label', t(labelKey));
-
-    input.addEventListener('input', () => {
-      const value = Number(input.value) as SettingsData[K];
-      this.settings.set(key, value);
-      this.bus.emit('ui:settingChanged', { key: String(key), value });
-    });
-
-    return this.row(labelKey, input, id);
-  }
-
-  private toggle<K extends keyof SettingsData>(labelKey: string, key: K): HTMLElement {
-    const id = `set_${String(key)}`;
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = id;
-    input.checked = Boolean(this.settings.get()[key]);
-    input.style.cssText = 'width:20px;height:20px;accent-color:var(--lp-lumen)';
-    input.setAttribute('aria-label', t(labelKey));
-
-    input.addEventListener('change', () => {
-      this.settings.set(key, input.checked as SettingsData[K]);
-      this.bus.emit('ui:settingChanged', { key: String(key), value: input.checked });
-    });
-
-    return this.row(labelKey, input, id);
   }
 }

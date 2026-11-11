@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { NO_INK } from '@engine/render/InkEffect';
+import { toonGradient } from '@engine/render/WorldMaterial';
 import { makeRng } from '@core/math/rng';
 import { applyAtmosphere, atmosphereUniforms } from '@engine/render/Atmosphere';
 
@@ -187,7 +189,7 @@ varying vec3 vGrassWorld;
 export class GrassField {
   readonly group = new THREE.Group();
   private readonly chunks: Chunk[] = [];
-  private readonly material: THREE.MeshStandardMaterial;
+  private readonly material: THREE.MeshToonMaterial;
   private readonly uniforms = {
     uTime: { value: 0 },
     uPlayer: { value: new THREE.Vector3() },
@@ -233,11 +235,10 @@ export class GrassField {
     this.material.dispose();
   }
 
-  private buildMaterial(): THREE.MeshStandardMaterial {
-    const material = new THREE.MeshStandardMaterial({
-      roughness: 0.82,
-      metalness: 0,
+  private buildMaterial(): THREE.MeshToonMaterial {
+    const material = new THREE.MeshToonMaterial({
       side: THREE.DoubleSide,
+      gradientMap: toonGradient(),
     });
     material.name = 'grass';
 
@@ -263,6 +264,7 @@ export class GrassField {
           vec3 gTip = vGrassColour * vec3(1.18, 1.14, 0.9) + vec3(0.05, 0.05, 0.0);
           diffuseColor.rgb = mix(gRoot, gTip, smoothstep(0.0, 1.0, vGrassH));`,
         )
+        .replace('#include <dithering_fragment>', `#include <dithering_fragment>\n${NO_INK}`)
         .replace(
           '#include <normal_fragment_begin>',
           `#include <normal_fragment_begin>

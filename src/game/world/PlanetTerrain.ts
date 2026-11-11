@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { fbm3 } from '@core/math/rng';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { createWorldMaterial } from '@engine/render/WorldMaterial';
+import { createPhysicalMaterial, createWorldMaterial } from '@engine/render/WorldMaterial';
 import { applyAtmosphere } from '@engine/render/Atmosphere';
 import {
   PLANET_RADIUS,
@@ -141,7 +141,7 @@ export class PlanetTerrain {
     ico.dispose();
     this.displace(geometry);
 
-    const material = createWorldMaterial({ vertexColors: true, roughness: 0.95 });
+    const material = createWorldMaterial({ vertexColors: true });
     // Break the vertex colour up per pixel. Vertices are a metre and a half
     // apart, and a smooth gradient between them is exactly what a lit field
     // does *not* look like: real grass is patchy at every scale, warm where
@@ -168,11 +168,6 @@ ${VALUE_NOISE_GLSL}`)
             diffuseColor.rgb * vec3(1.12, 1.04, 0.8),
             smoothstep(0.5, 0.85, tBroad) * 0.55
           );`,
-        )
-        .replace(
-          '#include <roughnessmap_fragment>',
-          `#include <roughnessmap_fragment>
-          roughnessFactor = clamp(roughnessFactor - tFine * 0.12, 0.0, 1.0);`,
         );
     };
 
@@ -186,7 +181,7 @@ ${VALUE_NOISE_GLSL}`)
     // reflects — at a grazing angle almost all of it — so the surface is
     // nearly mirror-smooth and the body colour is a dark teal that only shows
     // looking down into it.
-    const waterMaterial = createWorldMaterial({
+    const waterMaterial = createPhysicalMaterial({
       color: '#1d5a6b',
       transparent: true,
       opacity: 0.9,

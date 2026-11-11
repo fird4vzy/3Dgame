@@ -90,6 +90,30 @@ export interface EventMap {
   'shard:collected': { id: string; total: number; of: number; position: Vec3Like };
   'music:stemEnabled': { stem: string };
 
+  // ── journal & activities ────────────────────────────────────────────────
+  /** Something went into the journal. `kind` is stamp, souvenir, postcard, cat, course, delivery or intro. */
+  'journal:changed': { kind: string; id: string; points: number; total: number; rank: string };
+  'journal:rankUp': { title: string; reward: string | null; note: string | null };
+  /** A find, with the words to show for it. */
+  'journal:found': { kind: string; title: string; note: string; seal?: string };
+  'course:started': { id: string; name: string; gates: number };
+  'course:gate': { index: number; gates: number; seconds: number };
+  'course:finished': { id: string; seconds: number; medal: string | null; best: boolean };
+  'course:abandoned': { id: string };
+  'course:tick': { seconds: number; gate: number; gates: number };
+  'photo:modeChanged': { active: boolean };
+  /** What the viewfinder has in it right now, if it is something the journal wants. */
+  'photo:framed': { id: string | null; title: string | null; taken: boolean };
+  'photo:taken': { id: string | null; title: string | null; fresh: boolean };
+  /** The last delivery is made: the festival begins. */
+  'festival:started': void;
+  /** A firework went off there. */
+  'festival:burst': Vec3Like;
+  /** A postcard's picture, as a small data URL. */
+  'photo:developed': { id: string; image: string };
+  'ui:requestJournal': void;
+  'ui:requestPhotoMode': void;
+
   // ── interaction & dialogue ──────────────────────────────────────────────
   'interaction:focusChanged': { id: string | null; prompt: string | null };
   'dialogue:started': { id: string };

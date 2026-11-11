@@ -5,8 +5,10 @@
 A cozy 3D browser game: you are a courier on the dimming planet of Fennwick,
 and every parcel you deliver relights a piece of the world.
 
-**Status: Phases 0–4 complete, plus a painterly-realistic look — playable,
-scored, and lit like a Japanese valley at golden hour.**
+**Status: playable start to finish — five deliveries, a festival, and a
+journal of things to find — drawn as an anime background is painted: cel
+shading, an ink line, paper, and Fuji over the valley
+([`docs/30`](docs/30-drawn-not-rendered.md)).**
 
 ```bash
 npm install
@@ -17,12 +19,15 @@ npm run test:play    # full delivery playthrough in a browser
 npm run test:all     # typecheck + lint + unit + build
 ```
 
-Controls: **WASD** to move, **Shift** to run, **Space** to jump, move the mouse
-to look (the game takes the pointer when you start or click it; **Esc** pauses
-and gives it back). Gamepad and touch (floating joystick on the left half,
-drag to look on the right) both work. The dev build shows a debug overlay with frame rate,
-locomotion state and your position in the (lat, lon, alt) coordinates level data
-is authored in.
+Controls: **WASD** to move (she runs; hold **Shift** to walk — or turn that
+round in Settings), **Space** to jump (tap for a hop), **E** to talk and pick
+up, **C** for the postcard camera, **Tab** for the journal, mouse to look (the
+game takes the pointer when you start or click it; **Esc** pauses and gives it
+back). Gamepad works, and so does touch: a stick appears under the left thumb,
+the right thumb looks, and Jump, Talk, Photo, Journal and Pause have buttons.
+Add `?debug` to the address in a dev build for the overlay with frame rate,
+locomotion state and your position in the (lat, lon, alt) coordinates level
+data is authored in.
 
 ## What runs today
 
@@ -72,14 +77,20 @@ is authored in.
   the horizon, street lamps share a fixed pool of lights so no shader ever
   recompiles mid-game, and the quality tier is read from the GPU (override
   with `?quality=low|medium|high`) ([`docs/29`](docs/29-frame-rate-fuji-on-the-horizon.md))
-- 250 unit tests, two browser suites including a full scripted playthrough
+- **A journal** ([`docs/30`](docs/30-drawn-not-rendered.md)): six stamps, eight
+  keepsakes, six postcards taken with a camera that checks what is in frame,
+  a timed round of lanterns, small talk with every resident — all data in
+  [`src/data/activities.ts`](src/data/activities.ts) — and a standing that
+  earns two things that change how the game plays
+- **The festival**: the last delivery starts fireworks over the mountain
+- 277 unit tests, two browser suites including a scripted playthrough
 
 Payload today: 0.3 MB gzipped JS, 6.6 MB of models, 16.5 MB for the VRM plus
 0.5 MB of captured clips, 2.2 MB of audio. Grass, trees, leaf textures, sky
 and water are all generated at load. The 2.9 MB Meshy heroine is only
 fetched if the VRM fails to load.
 
-Not yet built: composed music, day/night and weather, photo mode.
+Not yet built: composed music, day/night and weather.
 Phase 5 in [`docs/13-roadmap.md`](docs/13-roadmap.md).
 
 ## Looking at it

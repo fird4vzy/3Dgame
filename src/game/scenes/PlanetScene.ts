@@ -10,8 +10,7 @@ import type { MusicDirector } from '@engine/audio/MusicDirector';
 import type { IScene } from '@engine/scene/IScene';
 import type { LoadedCharacter } from '@engine/character/CharacterFactory';
 import type { ClipName } from '@engine/character/CharacterDefinition';
-import { latLonToCartesian, shouldBeVisible } from '@core/math/spherical';
-import { atmosphereUniforms } from '@engine/render/Atmosphere';
+import { shouldBeVisible } from '@core/math/spherical';
 import { PLANET_RADIUS, PLAYER_HEIGHT, SEA_LEVEL_RADIUS, WORLD_SEED } from '@config/constants';
 
 import { PlanetTerrain } from '@game/world/PlanetTerrain';
@@ -41,6 +40,10 @@ import { DialogueSystem } from '@game/systems/DialogueSystem';
 import { IlluminationSystem } from '@game/systems/IlluminationSystem';
 import { DeliverySystem } from '@game/systems/DeliverySystem';
 import { ShardSystem } from '@game/systems/ShardSystem';
+import { JournalSystem } from '@game/systems/JournalSystem';
+import { Activities } from '@game/world/Activities';
+import type { JournalData } from '@engine/save/schema';
+import { SMALL_TALK } from '../../data/activities';
 import { ParticleSystem } from '@engine/vfx/ParticleSystem';
 import {
   buildDistrictProps,
@@ -54,7 +57,6 @@ import { loadInstancedProp, type InstancedPropOptions } from '@engine/render/ins
 import { loadStylisedModel } from '@engine/render/stylise';
 import { createStarfield } from '@game/world/Skydome';
 import { Environment } from '@game/world/Environment';
-import { Fuji, type FujiBackdrop } from '@game/world/Fuji';
 import { HorizonInstances } from '@engine/render/HorizonInstances';
 import { LightPool } from '@engine/render/LightPool';
 import { GrassField } from '@game/world/GrassField';
@@ -67,10 +69,9 @@ import { Fireflies } from '@game/world/Fireflies';
 import { Petals } from '@game/world/Petals';
 import { planWorld, type ShrinePrecinct, type WorldLayout } from '@game/world/layout';
 
-import { DISTRICTS, NPCS, npcById, type DistrictId, type ParcelWeight } from '../../data/content';
+import { CONTRACTS, DISTRICTS, NPCS, npcById, type DistrictId, type ParcelWeight } from '../../data/content';
 
 const _forward = new THREE.Vector3();
-const _sunUp = new THREE.Vector3();
 const _charFacing = new THREE.Vector3();
 const _characterUp = new THREE.Vector3();
 const _camForward = new THREE.Vector3();
@@ -88,8 +89,8 @@ const _emitPos = new THREE.Vector3();
 const DUST_COLOUR = new THREE.Color('#b9ae94');
 /** Matches the shard mesh's emissive, so the burst reads as the shard itself. */
 const SHARD_COLOUR = new THREE.Color('#f6bd60');
-const _fillRight = new THREE.Vector3();
-const _lightAnchor = new THREE.Vector3();
+const _frustum = new THREE.Frustum();
+const _viewProjection = new THREE.Matrix4();
 const _villagerUp = new THREE.Vector3();
 const _villagerTo = new THREE.Vector3();
 const _villagerFwd = new THREE.Vector3();
@@ -142,7 +143,9 @@ export class PlanetScene implements IScene {
   readonly quests: QuestSystem;
   readonly dialogue: DialogueSystem;
   readonly shards: ShardSystem;
-  readonly particles = new ParticleSystem(420);
+  readonly journal: JournalSystem;
+  activities!: Activities;
+  readonly particles = new ParticleSystem(900);
   illumination!: IlluminationSystem;
   delivery!: DeliverySystem;
 
@@ -162,7 +165,6 @@ export class PlanetScene implements IScene {
   private readonly cameraOccluders: THREE.Object3D[] = [];
   /** Sky, sun, air and the light they cast. */
   private environment!: Environment;
-  private fuji: Fuji | null = null;
   /**
    * Static instanced props, drawn only where they crest the horizon. The sea
    * floor is the lowest ground, so it is the sphere that hides things.
@@ -190,9 +192,6 @@ export class PlanetScene implements IScene {
   private readonly obstacleBatches: Float32Array[] = [];
   private obstaclesDirty = false;
   private obstacleClock = 0;
-  /** Short-range lights that follow the player, so she reads in the dark. */
-  private characterFill!: THREE.PointLight;
-  private characterRim!: THREE.PointLight;
   private lighthouse: { lamp: THREE.Mesh; light: THREE.PointLight } | null = null;
   private stars: THREE.Points | null = null;
   /** Resident rigs, for the idle sway. */
@@ -242,6 +241,78 @@ export class PlanetScene implements IScene {
     this.quests = new QuestSystem(bus);
     this.dialogue = new DialogueSystem(bus);
     this.shards = new ShardSystem(bus);
+    this.journal = new JournalSystem(bus);
+    this.journal.deliveryTotal = CONTRACTS.length;
+  }
+
+  /** Looking through the postcard camera. */
+  private photoMode = false;
+  /** Set by the shutter; the next drawn frame is developed into a postcard. */
+  private developing: string | null = null;
+  private festivalClock = 0;
+  private readonly talkTurn = new Map<string, number>();
+
+  get isPhotoMode(): boolean {
+    return this.photoMode;
+  }
+
+  /** Raise or lower the postcard camera. */
+  setPhotoMode(active: boolean): void {
+    if (active === this.photoMode) return;
+    if (active && (this.playerLocked || this.menuMode || this.paused)) return;
+    this.photoMode = active;
+    this.rig.setPhotoMode(active);
+    this.bus.emit('photo:modeChanged', { active });
+  }
+
+  /** What a resident says when there is no parcel between you. */
+  private smallTalk(npcId: string): void {
+    const talk = SMALL_TALK[npcId];
+    const npc = npcById(npcId);
+    if (!talk || !npc || this.dialogue.isActive) return;
+    const lines = this.districts.get(npc.district).lit ? talk.lit : talk.dark;
+    if (lines.length === 0) return;
+    const turn = this.talkTurn.get(npcId) ?? 0;
+    this.talkTurn.set(npcId, turn + 1);
+    this.setPlayerLocked(true);
+    void this.dialogue
+      .start(`${npcId}:talk`, [{ speaker: npc.displayName, text: lines[turn % lines.length]! }])
+      .finally(() => this.setPlayerLocked(false));
+  }
+
+  /**
+   * The festival: fireworks over the mountain, for as long as every district
+   * is lit. A burst every second or two, a long way off and high up.
+   */
+  private updateFestival(dt: number): void {
+    if (this.illuminationFraction < 0.999 || this.menuMode) return;
+    this.festivalClock -= dt;
+    if (this.festivalClock > 0) return;
+    this.festivalClock = 0.7 + Math.random() * 1.6;
+
+    const player = this.controller.smoothedPosition;
+    const up = _emitUp.copy(player).normalize();
+    const toward = this.environment.landmarkDirection;
+    const side = _emitPos.crossVectors(toward, up).normalize();
+    const origin = player
+      .clone()
+      .addScaledVector(toward, 26 + Math.random() * 16)
+      .addScaledVector(side, (Math.random() - 0.5) * 44)
+      .addScaledVector(up, 15 + Math.random() * 9);
+    const colour = new THREE.Color().setHSL(Math.random(), 0.85, 0.62);
+    this.particles.emit({
+      position: origin,
+      count: 70,
+      colour,
+      speed: [3.5, 7.5],
+      life: [1.1, 2.0],
+      size: [0.22, 0.4],
+      direction: up,
+      spread: Math.PI,
+      gravity: up.clone().multiplyScalar(-2.4),
+      drag: 1.3,
+    });
+    this.bus.emit('festival:burst', { x: origin.x, y: origin.y, z: origin.z });
   }
 
   async onEnter(): Promise<void> {
@@ -281,6 +352,28 @@ export class PlanetScene implements IScene {
       this.burstDistrict(district as DistrictId);
     });
 
+    this.activities = new Activities({
+      scene: this.world.scene,
+      bus: this.bus,
+      interaction: this.interaction,
+      journal: this.journal,
+      collision: this.collision,
+      landmarks: {
+        lighthouse: this.layout.lighthouse,
+        seaTorii: this.layout.seaTorii?.position ?? null,
+        shrine: this.layout.shrine.hall.position,
+      },
+      residents: this.npcObjects,
+      cats: () => this.cats?.positions().map((cat) => cat.position) ?? [],
+      mountain: () => this.environment.landmarkDirection,
+      cullables: this.cullables,
+    });
+    this.bus.on('cat:petted', ({ index, friend }) => {
+      if (friend) this.journal.add('cat', String(index));
+    });
+    this.bus.on('delivery:completed', () => this.journal.setDeliveries(this.quests.completedCount));
+    this.bus.on('dialogue:started', () => this.setPhotoMode(false));
+
     this.rig.addOccluders(this.cameraOccluders);
     this.occludersRegistered = true;
     this.flushObstacles();
@@ -315,10 +408,13 @@ export class PlanetScene implements IScene {
     completedContracts: readonly string[];
     litDistricts: readonly string[];
     collectedShards: readonly string[];
+    journal: JournalData;
   }): void {
     this.quests.restore(progress.completedContracts);
     this.illumination.restore(progress.litDistricts);
     this.shards.restore(progress.collectedShards);
+    this.journal.restore(progress.journal, progress.completedContracts.length);
+    this.activities.refresh();
     this.refreshNpcPrompts();
   }
 
@@ -333,20 +429,53 @@ export class PlanetScene implements IScene {
     this.quests.reset();
     this.illumination.reset();
     this.shards.reset();
+    this.journal.reset();
+    this.activities.reset();
+    this.setPhotoMode(false);
+    this.talkTurn.clear();
     this.warmth.clear();
     this.detachParcel();
     this.particles.clear();
     this.refreshNpcPrompts();
 
+    const spawn = this.spawnPoint();
+    this.controller.teleport(spawn.position, spawn.forward);
+    this.rig.reset(spawn.position, this.openingView(spawn));
+    this.composeSky(spawn);
+  }
+
+  /**
+   * The camera's first heading: off her shoulder, not straight behind her,
+   * so she does not stand in front of the man she is about to talk to.
+   */
+  private openingView(spawn: { position: THREE.Vector3; forward: THREE.Vector3 }): THREE.Vector3 {
+    return spawn.forward.clone().applyAxisAngle(spawn.position.clone().normalize(), 0.5);
+  }
+
+  /**
+   * Stand the mountain a little to the right of the opening view, so the
+   * first frame of a run has the postmaster, his office and Fuji in it.
+   */
+  private composeSky(spawn: { position: THREE.Vector3; forward: THREE.Vector3 }): void {
+    const up = spawn.position.clone().normalize();
+    this.environment.resetFrame(spawn.position, spawn.forward.clone().applyAxisAngle(up, 0.12));
+  }
+
+  /**
+   * Where a run begins: a few steps from the postmaster, facing him, so the
+   * first thing on screen is the person with the first thing to say.
+   */
+  private spawnPoint(): { position: THREE.Vector3; forward: THREE.Vector3 } {
     const odd = npcById('odd');
-    if (odd) {
-      const spawn = surfacePoint({ lat: odd.at.lat - 2.2, lon: odd.at.lon + 1.4 }, 0.2);
-      this.player.object3D.position.copy(spawn);
-      this.controller.velocity.set(0, 0, 0);
-      _forward.set(0, 1, 0).projectOnPlane(spawn.clone().normalize());
-      if (_forward.lengthSq() < 1e-6) _forward.set(1, 0, 0);
-      this.rig.reset(spawn, _forward.normalize());
-    }
+    const position = odd
+      ? surfacePoint({ lat: odd.at.lat - 2.2, lon: odd.at.lon + 1.4 }, 0.2)
+      : PlanetTerrain.findSpawn();
+    const up = position.clone().normalize();
+    const forward = odd
+      ? surfacePoint(odd.at, 0).sub(position).projectOnPlane(up)
+      : new THREE.Vector3(0, 1, 0).projectOnPlane(up);
+    if (forward.lengthSq() < 1e-6) forward.set(1, 0, 0).projectOnPlane(up);
+    return { position, forward: forward.normalize() };
   }
 
   /**
@@ -366,7 +495,10 @@ export class PlanetScene implements IScene {
     }
     if (!active) {
       this.player.object3D.getWorldDirection(_forward);
-      this.rig.reset(this.controller.smoothedPosition, _forward);
+      this.rig.reset(
+        this.controller.smoothedPosition,
+        this.openingView({ position: this.controller.smoothedPosition, forward: _forward }),
+      );
     }
   }
 
@@ -422,22 +554,39 @@ export class PlanetScene implements IScene {
       this.player.object3D.getWorldDirection(_forward);
       this.interaction.update(this.player.object3D.position, _forward);
 
+      if (this.input.wasPressed('camera')) this.setPhotoMode(!this.photoMode);
+      if (this.input.wasPressed('journal')) this.bus.emit('ui:requestJournal');
+      if (this.input.wasPressed('pause')) this.bus.emit('ui:requestPause');
+
       if (this.input.wasPressed('interact')) {
         this.input.consume('interact');
-        this.interaction.activate();
+        if (this.photoMode) this.pressShutter();
+        else this.interaction.activate();
       }
     }
+  }
+
+  /** Take the picture the viewfinder is showing. */
+  pressShutter(): void {
+    if (!this.photoMode) return;
+    const card = this.activities.shoot(this.renderer.camera);
+    if (card) this.developing = card.id;
   }
 
   update(dt: number): void {
     if (this.paused) return;
     this.lastDelta = dt;
     this.world.update(dt);
-    this.updateCharacterLights();
     this.illumination.update(dt);
     this.lampLights.update(this.player.object3D.position);
     this.shards.update(dt, this.player.object3D.position);
     this.syncCharacterAnimation(dt);
+    this.activities.update(dt, this.controller.smoothedPosition);
+    this.updateFestival(dt);
+    if (this.character) {
+      // She is behind the lens, not in front of it.
+      this.character.object3D.visible = this.rig.photoAmount < 0.5;
+    }
     this.updateCharacterTint();
     this.updateVillagers(dt);
     this.terrain.update(dt);
@@ -468,7 +617,7 @@ export class PlanetScene implements IScene {
     if (this.menuMode) {
       this.updateMenuCamera(dt);
     } else {
-      this.rig.update(dt, this.controller.smoothedPosition);
+      this.rig.update(dt, this.controller.smoothedPosition, this.controller.planarSpeed);
     }
     // After the camera has moved: the sky is centred on it.
     this.environment.update(
@@ -483,18 +632,7 @@ export class PlanetScene implements IScene {
     );
     this.cullBelowHorizon();
     this.cullInstancesBelowHorizon(dt);
-    if (this.fuji) {
-      // Like the sky: the orbital menu shot is the planet against space.
-      if (this.menuMode) this.fuji.mesh.visible = false;
-      else this.fuji.place(this.renderer.camera.position);
-      this.fuji.update({
-        sunDirection: this.environment.sunDirection,
-        sun: this.environment.sun,
-        haze: this.environment.hazeColour,
-        hazeDensity: atmosphereUniforms.atmoParams.value.x,
-      });
-    }
-
+    if (this.photoMode) this.activities.frame(this.renderer.camera);
     if (this.character) {
       this.player.object3D.getWorldDirection(_charFacing);
       this.character.lateUpdate(this.renderer.camera, _charFacing);
@@ -512,6 +650,15 @@ export class PlanetScene implements IScene {
       );
     }
     this.renderer.render(this.world.scene, this.lastDelta);
+
+    // Develop the postcard from the frame that was just drawn: the drawing
+    // buffer is only guaranteed to hold it until this task ends.
+    if (this.developing) {
+      const id = this.developing;
+      this.developing = null;
+      const image = this.renderer.snapshot(320, 200);
+      if (image) this.bus.emit('photo:developed', { id, image });
+    }
   }
 
   dispose(): void {
@@ -532,18 +679,18 @@ export class PlanetScene implements IScene {
   // ── queries used by the HUD ─────────────────────────────────────────────
 
   /** Where the compass should point: the giver, then the recipient. */
-  get objectiveTarget(): { position: THREE.Vector3; hint: string } | null {
+  get objectiveTarget(): { position: THREE.Vector3; hint: string; title: string; kind: 'course' | 'deliver' | 'collect' } | null {
+    const lantern = this.activities?.courseTarget;
+    if (lantern) return { position: lantern, hint: '', title: '', kind: 'course' };
     const active = this.quests.active;
     if (active) {
       const object = this.npcObjects.get(active.def.recipient);
-      if (object) return { position: object.position, hint: active.def.hint };
+      if (object) return { position: object.position, hint: active.def.hint, title: active.def.title, kind: 'deliver' };
     }
     const next = this.quests.nextAvailable;
     if (next) {
       const object = this.npcObjects.get(next.def.giver);
-      if (object) {
-        return { position: object.position, hint: 'The postmaster has work for you.' };
-      }
+      if (object) return { position: object.position, hint: '', title: '', kind: 'collect' };
     }
     return null;
   }
@@ -567,9 +714,15 @@ export class PlanetScene implements IScene {
       markers.push({ position: object.position, kind: 'npc', label: id });
     }
 
-    for (const shard of this.shards.uncollectedPositions()) {
-      markers.push({ position: shard, kind: 'shard' });
+    // Shards and keepsakes are on the dial only once she has earned the
+    // compass that finds them; until then they are for eyes, not instruments.
+    const compass = this.journal.owns('compass');
+    if (compass) {
+      for (const shard of this.shards.uncollectedPositions()) {
+        markers.push({ position: shard, kind: 'shard' });
+      }
     }
+    markers.push(...this.activities.markers(compass));
 
     return markers;
   }
@@ -627,51 +780,23 @@ export class PlanetScene implements IScene {
     this.addStars(scene);
     scene.add(this.particles.mesh);
 
-    this.fuji = new Fuji(fujiFromTheVillage());
-    scene.add(this.fuji.mesh);
   }
 
   private buildLighting(): void {
     const scene = this.world.scene;
 
-    // A key light that belongs to the character, not to the world.
-    //
-    // The premise puts the player in an unlit district for the whole opening,
-    // and the honest consequence was that she rendered as a black silhouette
-    // with two pale arms — a dark-haired figure in dark clothes under a
-    // hemisphere light is simply not readable. Raising the ambient instead
-    // would have flattened the entire planet and thrown away the "light is
-    // returning" hook, so this is local: a short-range, cool fill that rides
-    // above and behind the camera and reaches almost nothing else.
-    //
-    // Every third-person game does this. It is not cheating; it is the reason
-    // you can see the protagonist at night.
-    //
-    // Kept well under the bloom threshold (0.55). These were first tuned on a
-    // machine where post-processing was off, and at 2.1 they lit her pale skin
-    // hot enough that bloom picked it up and gave her a glowing white outline.
-    // A character light is meant to be invisible; the moment you can see it, it
-    // is too strong.
-    this.characterFill = new THREE.PointLight(0xa8bce8, 1.05, 5.0, 2);
-    scene.add(this.characterFill);
-
-    // ...and a warm rim from the opposite side, which is what separates her
-    // from the background rather than merely brightening her.
-    this.characterRim = new THREE.PointLight(0xffd2a0, 0.3, 4.5, 2);
-    scene.add(this.characterRim);
-
+    // No lights of the player's own. There were two — a cool fill and a warm
+    // rim that rode with the camera — from when the planet opened in the
+    // dark. Under a daylight sky they did nothing she needed, and every lit
+    // fragment on screen paid for both.
     // Street lamps borrow from a fixed set of lights, so walking past them
     // never changes how many lights the scene has (LightPool).
-    this.lampLights = new LightPool({ low: 2, medium: 4, high: 6 }[this.renderer.tier]);
+    this.lampLights = new LightPool({ low: 2, medium: 3, high: 5 }[this.renderer.tier]);
     for (const light of this.lampLights.lights) scene.add(light);
   }
 
   private buildPlayer(): void {
-    // Spawn beside the postmaster, so the first thing on screen is the hook.
-    const odd = npcById('odd');
-    const spawn = odd
-      ? surfacePoint({ lat: odd.at.lat - 2.2, lon: odd.at.lon + 1.4 }, 0.2)
-      : PlanetTerrain.findSpawn();
+    const { position: spawn, forward } = this.spawnPoint();
 
     this.player = new Entity('player', new THREE.Group());
     this.player.object3D.add(createPlaceholderCharacter());
@@ -691,6 +816,8 @@ export class PlanetScene implements IScene {
         // The rig is created just below; the closure defers the lookup so the
         // controller always reads the current, stable tangent heading.
         heading: (out) => (this.rig ? this.rig.getHeading(out) : out.set(0, 0, 1)),
+        // The second reward of the journal: sandals that carry her faster.
+        speedScale: () => (this.journal.owns('geta') ? 1.12 : 1),
       }),
     );
 
@@ -707,12 +834,13 @@ export class PlanetScene implements IScene {
     );
 
     this.world.add(this.player);
+    this.controller.teleport(spawn, forward);
 
-    this.rig = new FollowRig(this.renderer.camera, this.input, this.collision);
-    const up = spawn.clone().normalize();
-    _forward.set(0, 1, 0).projectOnPlane(up);
-    if (_forward.lengthSq() < 1e-6) _forward.set(1, 0, 0).projectOnPlane(up);
-    this.rig.reset(spawn, _forward.normalize());
+    this.rig = new FollowRig(this.renderer.camera, this.input, this.collision, (deg) =>
+      this.renderer.setBaseFov(deg),
+    );
+    this.rig.reset(spawn, this.openingView({ position: spawn, forward }));
+    this.composeSky({ position: spawn, forward });
 
     this.bus.emit('player:spawned', { entityId: this.player.id });
   }
@@ -987,7 +1115,10 @@ export class PlanetScene implements IScene {
         radius: 2.4,
         prompt: 'Talk',
         enabled: true,
-        onInteract: () => void this.delivery.interactWith(npc.id),
+        onInteract: () => {
+          if (this.delivery.roleFor(npc.id)) void this.delivery.interactWith(npc.id);
+          else this.smallTalk(npc.id);
+        },
       });
     }
 
@@ -1058,7 +1189,8 @@ export class PlanetScene implements IScene {
       const object = this.npcObjects.get(npc.id);
       const ring = object?.children.find((c) => c.type === 'Mesh' && c !== object.children[0]);
 
-      this.interaction.setEnabled(`npc_${npc.id}`, role !== null);
+      // Everyone can be talked to; the ring marks who has business with her.
+      this.interaction.setEnabled(`npc_${npc.id}`, role !== null || SMALL_TALK[npc.id] !== undefined);
       if (ring) ring.visible = role !== null;
     }
   }
@@ -1787,31 +1919,6 @@ export class PlanetScene implements IScene {
     this.callbacks.onDistrictChanged?.(runtime.def.id, runtime.def.displayName);
   }
 
-  private updateCharacterLights(): void {
-    const position = this.player.object3D.position;
-    _sunUp.copy(position).normalize();
-
-    // Character lights ride with the camera, so she is lit from the side the
-    // player is looking from however the camera is orbited. Both sit close to
-    // her — their range is metres, not tens of metres, so the terrain and the
-    // props around her stay as dark as the district's own illumination says.
-    this.renderer.camera.getWorldDirection(_camForward);
-    _fillRight.copy(_sunUp).cross(_camForward).normalize();
-    const chest = _lightAnchor.copy(position).addScaledVector(_sunUp, PLAYER_HEIGHT * 0.75);
-
-    this.characterFill.position
-      .copy(chest)
-      .addScaledVector(_camForward, -1.6)
-      .addScaledVector(_fillRight, 1.5)
-      .addScaledVector(_sunUp, 1.2);
-
-    this.characterRim.position
-      .copy(chest)
-      .addScaledVector(_camForward, 1.5)
-      .addScaledVector(_fillRight, -1.6)
-      .addScaledVector(_sunUp, 1.0);
-  }
-
   private addStars(scene: THREE.Scene): void {
     this.stars = createStarfield();
     scene.add(this.stars);
@@ -1846,28 +1953,16 @@ export class PlanetScene implements IScene {
         if (mesh.isInstancedMesh && mesh.userData.horizonCull === true) this.horizonInstances.add(mesh);
       });
     }
-    this.horizonInstances.update(this.renderer.camera.position);
+    const camera = this.renderer.camera;
+    camera.updateMatrixWorld();
+    _viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_viewProjection);
+    this.horizonInstances.update(camera.position, {
+      frustum: _frustum,
+      centre: this.controller.smoothedPosition,
+      // The shadow box reaches 22 m; what stands inside it may be out of
+      // shot and still cast into the picture.
+      keepWithin: 24,
+    });
   }
-}
-
-/**
- * Fuji's backdrop: toward the west-south-west of the village, the way the
- * village looks out (the land falls away there, and the sun north-north-west
- * of everyone lights it from the side — docs/28). It stays toward that same
- * world direction wherever you walk, on the horizon, a modest 7° tall.
- */
-function fujiFromTheVillage(): FujiBackdrop {
-  const landing = DISTRICTS.find((d) => d.id === 'landing');
-  const c = latLonToCartesian(landing?.centre.lat ?? 62, landing?.centre.lon ?? 30, 1);
-  const up = new THREE.Vector3(c.x, c.y, c.z).normalize();
-  const north = new THREE.Vector3(0, 1, 0).projectOnPlane(up).normalize();
-  const east = new THREE.Vector3().crossVectors(up, north).normalize();
-  const bearing = THREE.MathUtils.degToRad(250);
-  const toward = north.multiplyScalar(Math.cos(bearing)).addScaledVector(east, Math.sin(bearing));
-  return {
-    bearing: toward,
-    distance: 380,
-    peak: THREE.MathUtils.degToRad(7),
-    planetRadius: PLANET_RADIUS,
-  };
 }

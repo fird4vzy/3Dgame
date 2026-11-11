@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { createWorldMaterial } from './WorldMaterial';
 
 /**
  * Bring an imported model into this world.
@@ -57,35 +58,47 @@ const _size = new THREE.Vector3();
 const _centre = new THREE.Vector3();
 
 /**
- * Convert one material to the world's shading, keeping everything it carries.
+ * How many samples a texture may take along a surface seen edge-on.
  *
- * Physically based in, physically based out: the base colour map is the reason
- * to buy a textured model, and any normal, roughness, metalness, occlusion or
- * emissive maps it brings are kept, because under a sky-lit environment they
- * are what separates carved wood from painted cardboard. What *is* normalised
- * is the response — generators like to mark things metallic, and a metallic
- * roof under a blue sky turns into a mirror — so metalness is capped and
- * roughness floored to the matte range the rest of the village sits in.
- * Emissive survives, since the illumination system drives emissive on lamps.
+ * It was 1, three's default, which is the largest single reason the houses
+ * looked blurred: a roof is nearly always seen at a grazing angle, and
+ * without anisotropic filtering the sampler picks the mip level for the
+ * *steepest* axis and smears the other one. Eight is past the point of
+ * visible return and costs very little.
  */
-function toWorld(source: THREE.Material, options: StyliseOptions): THREE.MeshStandardMaterial {
+export const TEXTURE_ANISOTROPY = 8;
+
+/** Make a colour map as sharp as its pixels allow. */
+export function sharpen(texture: THREE.Texture | null): THREE.Texture | null {
+  if (!texture) return null;
+  texture.anisotropy = TEXTURE_ANISOTROPY;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * Convert one material to the world's shading, keeping its picture.
+ *
+ * The base colour map is the reason to import a textured model, so it is kept
+ * and filtered as sharply as it allows. The physical maps are dropped: the
+ * world is cel-shaded (see `WorldMaterial`), and a roughness or metalness map
+ * has nothing to say to two flat tones. Emissive survives, since the
+ * illumination system drives emissive on lamps.
+ */
+function toWorld(source: THREE.Material, options: StyliseOptions): THREE.MeshToonMaterial {
   const from = source as THREE.MeshStandardMaterial;
 
-  const material = new THREE.MeshStandardMaterial({
+  const material = createWorldMaterial({
     color: from.color?.clone() ?? new THREE.Color('#ffffff'),
-    map: from.map ?? null,
-    normalMap: from.normalMap ?? null,
-    roughnessMap: from.roughnessMap ?? null,
-    metalnessMap: from.metalnessMap ?? null,
-    aoMap: from.aoMap ?? null,
-    roughness: Math.max(0.55, from.roughness ?? 0.85),
-    metalness: Math.min(0.15, from.metalness ?? 0),
+    map: sharpen(from.map ?? null),
     transparent: from.transparent ?? false,
     opacity: from.opacity ?? 1,
     alphaTest: from.alphaTest ?? 0,
     side: from.side ?? THREE.FrontSide,
   });
-  if (from.normalScale) material.normalScale.copy(from.normalScale);
 
   if (from.emissive) {
     material.emissive = from.emissive.clone();
@@ -112,13 +125,13 @@ export function styliseModel(root: THREE.Object3D, options: StyliseOptions = {})
   // Materials first: converting after scaling would be identical, but doing it
   // first means the bounding box below is measured on the final materials, which
   // matters if any of them turn out to be double-sided.
-  const converted = new Map<THREE.Material, THREE.MeshStandardMaterial>();
+  const converted = new Map<THREE.Material, THREE.MeshToonMaterial>();
 
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
 
-    const replace = (material: THREE.Material): THREE.MeshStandardMaterial => {
+    const replace = (material: THREE.Material): THREE.MeshToonMaterial => {
       const existing = converted.get(material);
       if (existing) return existing;
       const world = toWorld(material, options);

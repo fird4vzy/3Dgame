@@ -1,5 +1,5 @@
 /** Bump this whenever the shape of SaveData changes, and add a migration. */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export const SAVE_KEY = 'lumenpost.save';
 
@@ -12,11 +12,32 @@ export interface SettingsData {
   invertY: boolean;
   cameraSensitivity: number;
   reduceMotion: boolean;
-  cameraShake: boolean;
   uiScale: number;
-  subtitles: boolean;
   language: string;
+  /** On a keyboard: run by default, Shift to walk. */
+  alwaysRun: boolean;
 }
+
+/** The courier's journal: what she has found, stamped, photographed and won. */
+export interface JournalData {
+  stamps: string[];
+  souvenirs: string[];
+  postcards: string[];
+  /** Cats petted often enough to count as friends. */
+  catFriends: string[];
+  /** Best time on each timed course, seconds. */
+  courseBest: Record<string, number>;
+  introSeen: boolean;
+}
+
+export const emptyJournal = (): JournalData => ({
+  stamps: [],
+  souvenirs: [],
+  postcards: [],
+  catFriends: [],
+  courseBest: {},
+  introSeen: false,
+});
 
 export interface ProgressData {
   completedContracts: string[];
@@ -24,6 +45,7 @@ export interface ProgressData {
   enabledStems: string[];
   collectedShards: string[];
   currentContract: string | null;
+  journal: JournalData;
 }
 
 export interface StatsData {
@@ -51,10 +73,9 @@ export const DEFAULT_SETTINGS: SettingsData = {
   invertY: false,
   cameraSensitivity: 1,
   reduceMotion: false,
-  cameraShake: true,
   uiScale: 1,
-  subtitles: true,
   language: 'en',
+  alwaysRun: true,
 };
 
 export function createDefaultSave(): SaveData {
@@ -66,6 +87,7 @@ export function createDefaultSave(): SaveData {
       enabledStems: [],
       collectedShards: [],
       currentContract: null,
+      journal: emptyJournal(),
     },
     settings: { ...DEFAULT_SETTINGS },
     stats: {

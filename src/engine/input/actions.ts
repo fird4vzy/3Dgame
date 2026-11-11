@@ -3,7 +3,16 @@
  * and touch controls then become backend concerns rather than gameplay changes.
  */
 export type Axis2DAction = 'move' | 'look';
-export type ButtonAction = 'run' | 'jump' | 'interact' | 'emote' | 'pause';
+export type ButtonAction =
+  | 'run'
+  | 'jump'
+  | 'interact'
+  | 'emote'
+  | 'pause'
+  /** Raise or lower the postcard camera. */
+  | 'camera'
+  /** Open the courier's journal. */
+  | 'journal';
 
 export interface Vec2 {
   x: number;
@@ -16,6 +25,8 @@ export const DEFAULT_KEY_BINDINGS: Record<ButtonAction, string[]> = {
   interact: ['KeyE', 'KeyF'],
   emote: ['KeyQ'],
   pause: ['Escape'],
+  camera: ['KeyC'],
+  journal: ['Tab', 'KeyJ'],
 };
 
 export const MOVE_KEYS = {

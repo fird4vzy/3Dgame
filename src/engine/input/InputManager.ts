@@ -16,6 +16,8 @@ interface ButtonState {
   releasedThisFrame: boolean;
   /** Seconds since the last press, used for jump buffering. */
   sincePress: number;
+  /** Pressed since the last frame began, and so not yet aged. */
+  fresh: boolean;
 }
 
 const makeButton = (): ButtonState => ({
@@ -23,6 +25,7 @@ const makeButton = (): ButtonState => ({
   pressedThisFrame: false,
   releasedThisFrame: false,
   sincePress: Infinity,
+  fresh: false,
 });
 
 /**
@@ -39,6 +42,8 @@ export class InputManager {
     interact: makeButton(),
     emote: makeButton(),
     pause: makeButton(),
+    camera: makeButton(),
+    journal: makeButton(),
   };
 
   private readonly keysDown = new Set<string>();
@@ -60,6 +65,8 @@ export class InputManager {
   private device: DeviceKind = 'keyboard';
   private disposers: Array<() => void> = [];
   private enabled = true;
+  /** On a keyboard: run unless Shift is held, instead of only while it is. */
+  private alwaysRun = false;
 
   constructor(
     private readonly target: HTMLElement,
@@ -179,7 +186,24 @@ export class InputManager {
     return this.device;
   }
 
-  /** Poll pad state and fold every source into the action map. */
+  /**
+   * Run by default on a keyboard, with Shift to slow to a walk.
+   *
+   * A stick already says how fast by how far it is pushed; a keyboard can only
+   * say "W", and holding a second key for the whole of every journey is a
+   * chore. Sticks and touch are unaffected.
+   */
+  setAlwaysRun(alwaysRun: boolean): void {
+    this.alwaysRun = alwaysRun;
+  }
+
+  /** Where the floating touch stick is, for the HUD to draw it. Null when no thumb is down. */
+  get touchStick(): { origin: Vec2; vector: Vec2 } | null {
+    if (this.moveTouchId === null) return null;
+    return { origin: this.moveTouchOrigin, vector: this.touchMove };
+  }
+
+  /** Poll pad state and fold every source into the action map. `dt` is the real frame time. */
   beginFrame(dt: number): void {
     if (!this.enabled) {
       this.moveVector = { x: 0, y: 0 };
@@ -187,8 +211,14 @@ export class InputManager {
       return;
     }
 
+    // A press ages from the frame *after* the one it arrived before. The
+    // simulation reads "pressed within the last 0.14 s" in its fixed steps,
+    // which run after this; aged by a whole slow frame first, a press could be
+    // too old before any step had seen it, and below about seven frames a
+    // second the jump stopped working altogether.
     for (const state of Object.values(this.buttons)) {
-      if (state.sincePress !== Infinity) state.sincePress += dt;
+      if (state.fresh) state.fresh = false;
+      else if (state.sincePress !== Infinity) state.sincePress += dt;
     }
 
     const pad = this.pollGamepad();
@@ -197,10 +227,16 @@ export class InputManager {
     const keyMove = this.readKeyboardMove();
     this.moveVector = pickLargest(pickLargest(keyMove, pad.move), this.touchMove);
 
-    // Look: pointer drag, right stick (scaled by dt), or touch drag.
+    // Look: pointer travel, touch drag, or the right stick. The stick is a
+    // rate, so it is scaled by the real frame time (this was a constant 1/60,
+    // which made the camera turn faster the faster the machine) and expressed
+    // in the pixels of mouse travel that would turn the camera as far. Squared,
+    // so the middle of the stick is fine control and the rim is a full turn.
+    const px = 1 / tuning.camera.mouseSensitivity;
+    const curve = (v: number): number => v * Math.abs(v);
     this.lookDelta = {
-      x: this.pointerDelta.x + pad.look.x * tuning.camera.gamepadSensitivity * dt * 1000 + this.touchLookDelta.x,
-      y: this.pointerDelta.y + pad.look.y * tuning.camera.gamepadSensitivity * dt * 1000 + this.touchLookDelta.y,
+      x: this.pointerDelta.x + this.touchLookDelta.x + curve(pad.look.x) * tuning.camera.gamepadYawSpeed * px * dt,
+      y: this.pointerDelta.y + this.touchLookDelta.y + curve(pad.look.y) * tuning.camera.gamepadPitchSpeed * px * dt,
     };
     this.pointerDelta = { x: 0, y: 0 };
     this.touchLookDelta = { x: 0, y: 0 };
@@ -227,7 +263,10 @@ export class InputManager {
   }
 
   isDown(action: ButtonAction): boolean {
-    return this.buttons[action].down;
+    const down = this.buttons[action].down;
+    // Shift means "the other gait": with always-run on, it walks.
+    if (action === 'run' && this.alwaysRun && this.device === 'keyboard') return !down;
+    return down;
   }
 
   wasPressed(action: ButtonAction): boolean {
@@ -308,6 +347,8 @@ export class InputManager {
     this.syncHeld('interact', pressed(2));
     this.syncHeld('emote', pressed(12));
     this.syncHeld('pause', pressed(9));
+    this.syncHeld('camera', pressed(3));
+    this.syncHeld('journal', pressed(8));
 
     return { move, look };
   }
@@ -325,6 +366,7 @@ export class InputManager {
     state.down = true;
     state.pressedThisFrame = true;
     state.sincePress = 0;
+    state.fresh = true;
   }
 
   private release(action: ButtonAction): void {
@@ -351,8 +393,8 @@ export class InputManager {
     ][]) {
       if (codes.includes(e.code)) {
         this.press(action);
-        // Space and arrows scroll the page otherwise.
-        if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+        // Space and arrows scroll the page otherwise, and Tab leaves the canvas.
+        if (e.code === 'Space' || e.code === 'Tab' || e.code.startsWith('Arrow')) e.preventDefault();
       }
     }
   };

@@ -95,6 +95,18 @@ async function beginRun(page) {
     }
   }
   await page.waitForFunction(() => !window.__lumenpost.scene.isMenuMode, null, { timeout: 20000 });
+
+  // A new run opens on the story's first page; pass it as a player would.
+  // Clicked through the DOM: a real click here is the gesture that takes the
+  // pointer lock, and a locked pointer is not something this driver can use.
+  await page.waitForTimeout(600);
+  await page.evaluate(() => {
+    const go = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Step off the boat');
+    go?.click();
+  });
+  // These suites measure the walk and the run separately, so they hold Shift
+  // to run, the way the game played before running became the default.
+  await page.evaluate(() => window.__lumenpost.settings.set('alwaysRun', false));
   await page.waitForTimeout(700);
 }
 

@@ -8,7 +8,11 @@ export interface RouteReport {
   shards: number;
   shardTotal: number;
   districtsLit: number;
+  districtTotal: number;
   bestSeconds: number | null;
+  rank: string;
+  journal: number;
+  journalTotal: number;
 }
 
 const RATING_LABEL: Record<Rating, string> = {
@@ -18,17 +22,17 @@ const RATING_LABEL: Record<Rating, string> = {
 };
 
 const RATING_COLOUR: Record<Rating, string> = {
-  bright: '#f6bd60',
-  warm: '#e8a33a',
+  bright: '#ffc45c',
+  warm: '#f0a52e',
   cool: '#69a5d8',
 };
 
 /**
- * The win screen: what you did, and an invitation to go back.
+ * The festival: what the run came to, and an invitation to stay.
  *
- * There is no lose counterpart in v1 — the main game has no fail state (GDD
- * §2.6). The component is built to be reusable for Storm Run's ending, which is
- * the only mode that can end badly.
+ * There is no lose counterpart — the game has no fail state. The ending is
+ * not the end either: the fireworks go on behind this card, and whatever is
+ * still blank in the journal is still out there.
  */
 export class RouteReportScreen implements UIScreen {
   readonly id = 'route-report';
@@ -40,31 +44,43 @@ export class RouteReportScreen implements UIScreen {
 
   render(): HTMLElement {
     const root = document.createElement('div');
-    root.style.placeContent = 'center';
-    root.style.justifyItems = 'center';
 
     const scrim = document.createElement('div');
     scrim.className = 'lp-scrim';
+    // The fireworks are the point; let them through.
+    scrim.style.background = 'rgba(247,240,223,.18)';
+    scrim.style.backdropFilter = 'none';
     root.appendChild(scrim);
 
     const panel = document.createElement('div');
     panel.className = 'lp-panel';
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-modal', 'true');
-    panel.setAttribute('aria-label', 'Route report');
+    panel.setAttribute('aria-label', 'The festival begins');
 
     const title = document.createElement('h2');
     title.className = 'lp-title';
-    title.textContent = 'The planet is lit';
+    title.textContent = 'The festival begins';
 
     const sub = document.createElement('p');
     sub.className = 'lp-sub';
-    sub.textContent = 'Every lumen delivered. Fennwick is awake.';
+    sub.textContent = 'Every lantern in Fennwick is lit, and the valley can see the mountain again. You did that on foot.';
 
-    panel.append(title, sub);
+    const seals = document.createElement('div');
+    seals.className = 'lp-report-seals';
+    for (const character of ['灯', '籠', '祭']) {
+      const seal = document.createElement('span');
+      seal.className = 'lp-seal lp-seal--stamped';
+      seal.textContent = character;
+      seals.appendChild(seal);
+    }
+
+    panel.append(title, sub, seals);
     panel.append(
+      this.stat('Standing', this.report.rank),
       this.stat('Route time', formatTime(this.report.seconds)),
-      this.stat('Districts lit', `${this.report.districtsLit} / 5`),
+      this.stat('Districts lit', `${this.report.districtsLit} / ${this.report.districtTotal}`),
+      this.stat('Journal', `${this.report.journal} / ${this.report.journalTotal}`),
       this.stat('Lumen shards', `${this.report.shards} / ${this.report.shardTotal}`),
     );
 
@@ -82,9 +98,17 @@ export class RouteReportScreen implements UIScreen {
 
     panel.append(this.ratingRow());
 
+    const left = this.report.journalTotal - this.report.journal;
+    const hint = document.createElement('p');
+    hint.className = 'lp-hint';
+    hint.textContent =
+      left > 0
+        ? `${left} page${left === 1 ? '' : 's'} of your journal ${left === 1 ? 'is' : 'are'} still blank. The festival will wait.`
+        : 'Your journal is full. There is nothing on this planet you have not seen.';
+
     const actions = document.createElement('div');
     actions.className = 'lp-actions';
-    actions.style.marginTop = 'var(--lp-space-5)';
+    actions.style.marginTop = 'var(--lp-space-4)';
 
     const roam = document.createElement('button');
     roam.className = 'lp-btn lp-btn--primary';
@@ -93,7 +117,7 @@ export class RouteReportScreen implements UIScreen {
     roam.addEventListener('click', () => this.bus.emit('ui:requestResume'));
 
     actions.appendChild(roam);
-    panel.appendChild(actions);
+    panel.append(hint, actions);
 
     root.appendChild(panel);
     return root;
@@ -108,13 +132,13 @@ export class RouteReportScreen implements UIScreen {
     const row = document.createElement('div');
     row.className = 'lp-row';
 
-    const text = document.createElement('label');
+    const text = document.createElement('span');
+    text.className = 'lp-label';
     text.textContent = label;
 
     const readout = document.createElement('span');
+    readout.className = 'lp-value';
     readout.textContent = value;
-    readout.style.cssText =
-      'font-variant-numeric:tabular-nums;font-weight:600;color:var(--lp-ink)';
 
     row.append(text, readout);
     return row;
@@ -123,23 +147,20 @@ export class RouteReportScreen implements UIScreen {
   private ratingRow(): HTMLElement {
     const row = document.createElement('div');
     row.className = 'lp-row';
-    row.style.alignItems = 'center';
 
-    const text = document.createElement('label');
+    const text = document.createElement('span');
+    text.className = 'lp-label';
     text.textContent = 'Deliveries';
 
     const pips = document.createElement('div');
-    pips.style.cssText = 'display:flex;gap:6px';
+    pips.className = 'lp-pips';
 
     for (const rating of this.report.ratings) {
       const pip = document.createElement('span');
+      pip.className = 'lp-pip';
       pip.title = RATING_LABEL[rating];
       pip.setAttribute('aria-label', RATING_LABEL[rating]);
-      pip.style.cssText = [
-        'width:14px;height:14px;border-radius:50%',
-        `background:${RATING_COLOUR[rating]}`,
-        `box-shadow:0 0 10px ${RATING_COLOUR[rating]}`,
-      ].join(';');
+      pip.style.background = RATING_COLOUR[rating];
       pips.appendChild(pip);
     }
 

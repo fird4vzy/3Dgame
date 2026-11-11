@@ -17,6 +17,10 @@ Everything lives in `src/data/content.ts` (`DISTRICTS`, NPCs, `ContractDef`s wit
 - Dialogue tone: cozy, short lines, no exposition dumps. Speaker names must match NPC `displayName`.
 - Residents get a model by **role**, not at random (`PlanetScene` resident loading).
 
+## Things to find
+
+Stamps, keepsakes, postcards, timed courses, small talk and ranks are `src/data/activities.ts`. A new entry needs no code; points off the coast are moved ashore at build (`landPoint`). `tests/unit/activities.test.ts` checks ids are unique, every blank has a hint, and a course can be run inside its bronze time.
+
 ## Verify
 
 ```bash

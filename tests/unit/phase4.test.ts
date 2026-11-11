@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { ParticleSystem } from '../../src/engine/vfx/ParticleSystem';
-import { createWorldMaterial } from '../../src/engine/render/WorldMaterial';
+import { createWorldMaterial, toonGradient, toonRamp } from '../../src/engine/render/WorldMaterial';
 import { installAtmosphere, atmosphereUniforms } from '../../src/engine/render/Atmosphere';
-import { styliseModel } from '../../src/engine/render/stylise';
+import { styliseModel, TEXTURE_ANISOTROPY } from '../../src/engine/render/stylise';
 import { pickAudioFormat } from '../../src/engine/audio/formats';
 import { buildDistrictProps, buildLighthouse } from '../../src/game/entities/districtProps';
 import { DISTRICTS } from '../../src/data/content';
@@ -124,13 +124,26 @@ describe('ParticleSystem', () => {
 });
 
 describe('world shading', () => {
-  it('creates a matte physically based material', () => {
+  it('creates a cel-shaded material that shares one ramp', () => {
     const material = createWorldMaterial({ color: '#ff0000' });
-    expect(material).toBeInstanceOf(THREE.MeshStandardMaterial);
+    expect(material).toBeInstanceOf(THREE.MeshToonMaterial);
     expect(material.color.getHexString()).toBe('ff0000');
-    // Almost nothing in a village is shiny; low roughness on wood reads as plastic.
-    expect(material.roughness).toBeGreaterThanOrEqual(0.8);
-    expect(material.metalness).toBe(0);
+    expect(material.gradientMap).toBe(toonGradient());
+    expect(createWorldMaterial().gradientMap).toBe(material.gradientMap);
+  });
+
+  it('lights a surface in two flat tones with a narrow edge between them', () => {
+    // Turned away: no direct light at all. The hemisphere fills it.
+    expect(toonRamp(-1)).toBe(0);
+    expect(toonRamp(-0.1)).toBe(0);
+    // A glancing half-tone, flat across its width...
+    expect(toonRamp(0.1)).toBeCloseTo(0.5, 5);
+    expect(toonRamp(0.25)).toBeCloseTo(0.5, 5);
+    // ...and full light beyond it, flat again.
+    expect(toonRamp(0.5)).toBe(1);
+    expect(toonRamp(1)).toBe(1);
+    // Never brighter turned further from the light.
+    for (let f = -1; f < 1; f += 0.01) expect(toonRamp(f + 0.01)).toBeGreaterThanOrEqual(toonRamp(f));
   });
 
   it('carries emissive through, since the illumination system drives it', () => {
@@ -139,21 +152,23 @@ describe('world shading', () => {
     expect(material.emissiveIntensity).toBe(0);
   });
 
-  it('keeps an import\'s maps but tames generator metalness', () => {
-    const normalMap = new THREE.Texture();
-    const source = new THREE.MeshStandardMaterial({ metalness: 1, roughness: 0.1, normalMap });
+  it('keeps an import\'s picture and filters it sharply', () => {
+    const map = new THREE.Texture();
+    const source = new THREE.MeshStandardMaterial({ metalness: 1, roughness: 0.1, map });
     const root = new THREE.Group();
     root.add(new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), source));
 
     styliseModel(root, { height: 4 });
     const mesh = root.children[0] as THREE.Mesh;
-    const converted = mesh.material as THREE.MeshStandardMaterial;
+    const converted = mesh.material as THREE.MeshToonMaterial;
 
     expect(converted).not.toBe(source);
-    expect(converted.normalMap).toBe(normalMap);
-    // A metallic roof under a blue sky is a mirror.
-    expect(converted.metalness).toBeLessThanOrEqual(0.15);
-    expect(converted.roughness).toBeGreaterThanOrEqual(0.55);
+    expect(converted).toBeInstanceOf(THREE.MeshToonMaterial);
+    expect(converted.map).toBe(map);
+    // A roof is seen edge-on: without this the sampler smears it.
+    expect(map.anisotropy).toBe(TEXTURE_ANISOTROPY);
+    expect(TEXTURE_ANISOTROPY).toBeGreaterThanOrEqual(4);
+    expect(map.minFilter).toBe(THREE.LinearMipmapLinearFilter);
   });
 });
 

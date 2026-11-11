@@ -45,6 +45,8 @@ export interface ControllerDeps {
    * that is tangent by construction, so use it when one is available.
    */
   heading?: (out: THREE.Vector3) => THREE.Vector3;
+  /** Multiplier on walk and run speed — a reward the player has earned. */
+  speedScale?: () => number;
 }
 
 /**
@@ -70,11 +72,30 @@ export class SphericalCharacterController extends Component {
   groundNormal = new THREE.Vector3(0, 1, 0);
   state: LocomotionState = 'idle';
 
-  /** Interpolated render transform, written by the loop's interpolate phase. */
-  private readonly renderPosition = new THREE.Vector3();
+  /**
+   * The simulation's own transform, and the one before it.
+   *
+   * The entity's object3D is what gets *drawn*, so between fixed steps it holds
+   * a pose interpolated between these two. It used to hold the raw step: the
+   * camera followed a smoothed position while the body was drawn at the last
+   * 60 Hz tick, and at any frame rate that is not exactly 60 the two slid
+   * against each other — up to nine centimetres, a different amount every
+   * frame. That sliding was most of "the movement is not smooth".
+   */
+  private readonly simPosition = new THREE.Vector3();
+  private readonly simQuaternion = new THREE.Quaternion();
   private readonly previousPosition = new THREE.Vector3();
+  private readonly previousQuaternion = new THREE.Quaternion();
+  private readonly renderPosition = new THREE.Vector3();
+  /** What this component last wrote to the object, to notice a teleport. */
+  private readonly writtenPosition = new THREE.Vector3();
+  private readonly writtenQuaternion = new THREE.Quaternion();
 
   private timeSinceGrounded = Infinity;
+  /** True while a jump is still rising on the press that started it. */
+  private jumpHeld = false;
+  /** Seconds since take-off, while that is still true. */
+  private jumpAge = 0;
   private landingTimer = 0;
   private footstepAccumulator = 0;
 
@@ -83,21 +104,48 @@ export class SphericalCharacterController extends Component {
   }
 
   override onAttach(): void {
-    this.previousPosition.copy(this.entity.object3D.position);
-    this.renderPosition.copy(this.entity.object3D.position);
+    this.adoptTransform();
     this.groundNormal.copy(this.entity.object3D.position).normalize();
+  }
+
+  /**
+   * Put the character somewhere else, at once.
+   *
+   * `forward` faces her along a direction (projected onto the ground there).
+   * Nothing is interpolated across the jump and she arrives standing still.
+   */
+  teleport(position: THREE.Vector3, forward?: THREE.Vector3): void {
+    const transform = this.entity.object3D;
+    transform.position.copy(position);
+    if (forward) {
+      _up.copy(position).normalize();
+      _forward.copy(forward).projectOnPlane(_up);
+      if (_forward.lengthSq() > 1e-8) {
+        _forward.normalize();
+        _tmp.copy(position).sub(_forward);
+        _lookMatrix.lookAt(position, _tmp, _up);
+        transform.quaternion.setFromRotationMatrix(_lookMatrix);
+      }
+    }
+    this.velocity.set(0, 0, 0);
+    this.adoptTransform();
   }
 
   /** Planar speed, for animation blending and the run/walk threshold. */
   get planarSpeed(): number {
-    _up.copy(this.entity.object3D.position).normalize();
+    _up.copy(this.simPosition).normalize();
     return _horizontal.copy(this.velocity).projectOnPlane(_up).length();
   }
 
   override fixedUpdate(dt: number): void {
     const transform = this.entity.object3D;
+    // The object holds the drawn pose; the step runs on the simulated one.
+    if (this.movedExternally()) this.adoptTransform();
+    transform.position.copy(this.simPosition);
+    transform.quaternion.copy(this.simQuaternion);
     _prevPosition.copy(transform.position);
     this.previousPosition.copy(transform.position);
+    this.previousQuaternion.copy(transform.quaternion);
 
     // 1. Local frame. `up` is the defining quantity of a spherical world.
     _up.copy(transform.position).normalize();
@@ -117,8 +165,9 @@ export class SphericalCharacterController extends Component {
     if (inputMagnitude > 1e-4) _wish.normalize();
 
     const running = this.deps.input.isDown('run');
+    const scale = this.deps.speedScale?.() ?? 1;
     const targetSpeed =
-      inputMagnitude * (running ? tuning.move.runSpeed : tuning.move.walkSpeed);
+      inputMagnitude * (running ? tuning.move.runSpeed : tuning.move.walkSpeed) * scale;
 
     // 4. Split velocity into tangent and radial parts and accelerate each.
     _horizontal.copy(this.velocity).projectOnPlane(_up);
@@ -151,8 +200,22 @@ export class SphericalCharacterController extends Component {
       _vertical.copy(_up).multiplyScalar(tuning.move.jumpSpeed);
       this.grounded = false;
       this.timeSinceGrounded = Infinity;
+      this.jumpHeld = true;
+      this.jumpAge = 0;
       this.setState('jumping');
       this.deps.bus.emit('player:jumped');
+    } else if (this.jumpHeld) {
+      // Letting go early makes a hop of it: the rise is cut once, so a tap and
+      // a held press are two different jumps and the height is in the thumb.
+      // ...but not before the hop is a hop: the briefest tap still leaves
+      // the ground properly.
+      this.jumpAge += dt;
+      if (_vertical.dot(_up) <= 0) {
+        this.jumpHeld = false;
+      } else if (this.jumpAge >= tuning.move.minJumpTime && !this.deps.input.isDown('jump')) {
+        _vertical.multiplyScalar(tuning.move.jumpCut);
+        this.jumpHeld = false;
+      }
     }
 
     this.velocity.copy(_horizontal).add(_vertical);
@@ -160,7 +223,7 @@ export class SphericalCharacterController extends Component {
     // 7. Integrate, then resolve.
     transform.position.addScaledVector(this.velocity, dt);
     const wasGrounded = this.grounded;
-    this.resolveCollision(dt);
+    this.resolveCollision();
     this.snapToGround();
 
     // Standing still on walkable ground means standing still.
@@ -183,19 +246,66 @@ export class SphericalCharacterController extends Component {
     // 8. Orientation and animation state.
     this.orientToSurface(dt);
     this.updateState(dt);
-    this.emitFootsteps(dt, _prevPosition);
+    this.emitFootsteps(_prevPosition);
+
+    this.simPosition.copy(transform.position);
+    this.simQuaternion.copy(transform.quaternion);
+    this.writtenPosition.copy(transform.position);
+    this.writtenQuaternion.copy(transform.quaternion);
   }
 
-  /** Smooth the visible transform between fixed steps. */
+  /**
+   * Pose the drawn object between the last two fixed steps.
+   *
+   * Runs once a frame, after any steps and before anything reads the
+   * transform to draw with it. From here until the next step the object, the
+   * camera and every per-frame system agree about where she is.
+   */
   interpolate(alpha: number): void {
-    this.renderPosition.lerpVectors(this.previousPosition, this.entity.object3D.position, alpha);
+    const transform = this.entity.object3D;
+    if (this.movedExternally()) this.adoptTransform();
+    this.renderPosition.lerpVectors(this.previousPosition, this.simPosition, alpha);
+    transform.position.copy(this.renderPosition);
+    transform.quaternion.slerpQuaternions(this.previousQuaternion, this.simQuaternion, alpha);
+    this.writtenPosition.copy(transform.position);
+    this.writtenQuaternion.copy(transform.quaternion);
   }
 
+  /** Where she is drawn this frame: what the object3D holds after `interpolate`. */
   get smoothedPosition(): THREE.Vector3 {
     return this.renderPosition;
   }
 
-  private resolveCollision(dt: number): void {
+  /** Where the simulation has her, whatever is being drawn. */
+  get simulatedPosition(): THREE.Vector3 {
+    return this.simPosition;
+  }
+
+  /** Take the object's current transform as the simulation's, with no history. */
+  private adoptTransform(): void {
+    const transform = this.entity.object3D;
+    this.simPosition.copy(transform.position);
+    this.simQuaternion.copy(transform.quaternion);
+    this.previousPosition.copy(transform.position);
+    this.previousQuaternion.copy(transform.quaternion);
+    this.renderPosition.copy(transform.position);
+    this.writtenPosition.copy(transform.position);
+    this.writtenQuaternion.copy(transform.quaternion);
+  }
+
+  /**
+   * Something outside moved the object since we last wrote it — a respawn, a
+   * tool standing her at a viewpoint. Believe it rather than overwrite it.
+   */
+  private movedExternally(): boolean {
+    const transform = this.entity.object3D;
+    return (
+      !transform.position.equals(this.writtenPosition) ||
+      !transform.quaternion.equals(this.writtenQuaternion)
+    );
+  }
+
+  private resolveCollision(): void {
     const transform = this.entity.object3D;
     _up.copy(transform.position).normalize();
 
@@ -229,21 +339,13 @@ export class SphericalCharacterController extends Component {
     const slopeCos = Math.cos((tuning.move.maxSlopeDeg * Math.PI) / 180);
     const alignment = hit.normal.dot(_up);
 
-    if (alignment > slopeCos) {
-      this.grounded = true;
-      this.groundNormal.copy(hit.normal);
-      // Kill velocity into the surface, keep the tangential part — this is what
-      // produces sliding along walls instead of sticking to them.
-      const into = this.velocity.dot(hit.normal);
-      if (into < 0) this.velocity.addScaledVector(hit.normal, -into);
-    } else {
-      // Too steep to stand on: slide, but do not count as ground.
-      const into = this.velocity.dot(hit.normal);
-      if (into < 0) this.velocity.addScaledVector(hit.normal, -into);
-      this.grounded = false;
-    }
-
-    void dt;
+    // Kill velocity into the surface, keep the tangential part — this is what
+    // produces sliding along a face instead of sticking to it. Only ground
+    // shallow enough to stand on counts as ground.
+    const into = this.velocity.dot(hit.normal);
+    if (into < 0) this.velocity.addScaledVector(hit.normal, -into);
+    this.grounded = alignment > slopeCos;
+    if (this.grounded) this.groundNormal.copy(hit.normal);
   }
 
   /**
@@ -340,6 +442,7 @@ export class SphericalCharacterController extends Component {
 
   private onLand(): void {
     const impact = Math.abs(this.velocity.dot(_up));
+    this.jumpHeld = false;
     this.landingTimer = 0.16;
     this.setState('landing');
     this.deps.bus.emit('player:landed', {
@@ -349,7 +452,7 @@ export class SphericalCharacterController extends Component {
   }
 
   /** Distance-based footsteps, so cadence matches speed without animation events. */
-  private emitFootsteps(dt: number, previous: THREE.Vector3): void {
+  private emitFootsteps(previous: THREE.Vector3): void {
     if (!this.grounded) {
       this.footstepAccumulator = 0;
       return;
@@ -369,7 +472,6 @@ export class SphericalCharacterController extends Component {
       surface: PlanetTerrain.surfaceAt(position),
       position: { x: position.x, y: position.y, z: position.z },
     });
-    void dt;
   }
 
   private setState(next: LocomotionState): void {

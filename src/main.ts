@@ -12,12 +12,16 @@ import { SettingsManager } from '@engine/settings/SettingsManager';
 import { UIManager } from '@ui/UIManager';
 import { PauseScreen } from '@ui/screens/PauseScreen';
 import { PlanetScene } from '@game/scenes/PlanetScene';
-import { Hud } from '@ui/hud/Hud';
+import { Hud, type Objective } from '@ui/hud/Hud';
+import { TouchControls } from '@ui/hud/TouchControls';
 import { DialogueOverlay } from '@ui/screens/DialogueOverlay';
 import { RouteReportScreen } from '@ui/screens/RouteReportScreen';
+import { JournalScreen, type JournalView } from '@ui/screens/JournalScreen';
+import { IntroScreen } from '@ui/screens/IntroScreen';
 import { GameStateManager } from '@game/state/GameStateManager';
 import { DebugOverlay } from '@game/debug/DebugOverlay';
-import { DISTRICTS, CONTRACTS } from './data/content';
+import { DISTRICTS, CONTRACTS, npcById } from './data/content';
+import { COURSES, POSTCARDS, SOUVENIRS, STAMPS } from './data/activities';
 import { MainMenuScreen } from '@ui/screens/MainMenuScreen';
 import { SettingsScreen } from '@ui/screens/SettingsScreen';
 import { t, setLocale } from '@engine/i18n/Localization';
@@ -38,6 +42,9 @@ const boot = document.getElementById('boot');
 const bootBar = document.getElementById('boot-bar');
 const bootMsg = document.getElementById('boot-msg');
 
+/** Postcard pictures live beside the save, not in it: they are large and can be lost without harm. */
+const ALBUM_KEY = 'lumenpost.postcards';
+
 function setProgress(fraction: number, message?: string): void {
   if (bootBar) bootBar.style.width = `${Math.round(fraction * 100)}%`;
   if (message && bootMsg) bootMsg.textContent = message;
@@ -46,7 +53,40 @@ function setProgress(fraction: number, message?: string): void {
 function fail(message: string, detail?: unknown): void {
   console.error(message, detail);
   if (bootMsg) bootMsg.textContent = message;
-  if (bootBar) bootBar.style.background = '#c8582f';
+  if (bootBar) bootBar.style.background = '#c8402f';
+}
+
+function loadAlbum(): Record<string, string> {
+  try {
+    const raw = window.localStorage.getItem(ALBUM_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function storeAlbum(album: Record<string, string>): void {
+  try {
+    window.localStorage.setItem(ALBUM_KEY, JSON.stringify(album));
+  } catch {
+    // Storage full or unavailable: the journal entry stands, the picture does not.
+  }
+}
+
+/** Everything the screens need, in one bag, so the wiring functions stay readable. */
+interface Game {
+  bus: EventBus;
+  ui: UIManager;
+  settings: SettingsManager;
+  save: SaveManager;
+  scene: PlanetScene;
+  state: GameStateManager;
+  hud: Hud;
+  audio: AudioManager;
+  input: InputManager;
+  album: Record<string, string>;
+  runClock: { startedAt: number };
 }
 
 /**
@@ -94,9 +134,9 @@ async function bootstrap(): Promise<void> {
   const audio = new AudioManager();
   container.registerValue(Tokens.audio, audio);
   applyAudioSettings(audio, settings);
-  settings.observe('masterVolume', () => applyAudioSettings(audio, settings));
-  settings.observe('musicVolume', () => applyAudioSettings(audio, settings));
-  settings.observe('sfxVolume', () => applyAudioSettings(audio, settings));
+  for (const key of ['masterVolume', 'musicVolume', 'sfxVolume', 'ambienceVolume'] as const) {
+    settings.observe(key, () => applyAudioSettings(audio, settings));
+  }
 
   // Audio assets load in the background: the game is fully playable before
   // they arrive, and SoundBoard tolerates every buffer being absent.
@@ -109,10 +149,6 @@ async function bootstrap(): Promise<void> {
   const ui = new UIManager(uiRoot, bus);
   ui.setUiScale(settings.get().uiScale);
   settings.observe('uiScale', (scale) => ui.setUiScale(scale));
-  ui.transitions.setReduceMotion(settings.prefersReducedMotion);
-  settings.observe('reduceMotion', () =>
-    ui.transitions.setReduceMotion(settings.prefersReducedMotion),
-  );
   container.registerValue(Tokens.ui, ui);
   setProgress(0.5);
 
@@ -128,8 +164,39 @@ async function bootstrap(): Promise<void> {
   scene.restoreProgress(save.get().progress);
 
   const hud = new Hud(ui.hud, bus);
+  const touch = new TouchControls(ui.hud, input, bus);
   const dialogueOverlay = new DialogueOverlay(ui.hud, bus);
-  wireGameplay(bus, ui, scene, save, hud, state);
+  hud.setJournal(scene.journal.points, scene.journal.total, scene.journal.rank.title);
+
+  // Settings that change how the game is played, applied live.
+  const applyPlaySettings = (): void => {
+    const s = settings.get();
+    const reduce = settings.prefersReducedMotion;
+    input.setAlwaysRun(s.alwaysRun);
+    scene.rig.setLookOptions({ sensitivity: s.cameraSensitivity, invertY: s.invertY, reduceMotion: reduce });
+    ui.setReduceMotion(reduce);
+    dialogueOverlay.setInstant(reduce);
+  };
+  applyPlaySettings();
+  for (const key of ['alwaysRun', 'cameraSensitivity', 'invertY', 'reduceMotion'] as const) {
+    settings.observe(key, applyPlaySettings);
+  }
+
+  const game: Game = {
+    bus,
+    ui,
+    settings,
+    save,
+    scene,
+    state,
+    hud,
+    audio,
+    input,
+    album: loadAlbum(),
+    runClock: { startedAt: performance.now() },
+  };
+
+  wireGameplay(game);
   setProgress(1, t('loading.ready'));
 
   state.send('assetsReady');
@@ -138,31 +205,33 @@ async function bootstrap(): Promise<void> {
   // the player straight into a run with no context.
   scene.setMenuMode(true);
   hud.setVisible(false);
-  const runClock = { startedAt: performance.now() };
-  wireMenuFlow(bus, ui, settings, scene, state, save, hud, runClock, audio);
-  wirePauseFlow(bus, ui, settings, scene, state, audio, runClock);
-  showMainMenu(bus, ui, settings, save, () => scene.resetRun());
+  wireMenuFlow(game);
+  wirePauseFlow(game);
+  showMainMenu(game);
 
   void loadAudio(assets, soundBoard, save);
 
-  const debug = import.meta.env.DEV ? new DebugOverlay(document.body) : null;
+  const debug =
+    import.meta.env.DEV && new URLSearchParams(window.location.search).has('debug')
+      ? new DebugOverlay(document.body)
+      : null;
 
   const loop = new GameLoop({
-    beginFrame: () => input.beginFrame(1 / 60),
+    beginFrame: (dt) => input.beginFrame(dt),
     fixedUpdate: (dt) => scene.fixedUpdate(dt),
+    interpolate: (alpha) => scene.interpolate(alpha),
     update: (dt) => {
       scene.update(dt);
       dialogueOverlay.update(dt);
-      const objective = scene.objectiveTarget;
-      hud.setTarget(objective?.position ?? null, objective?.hint);
+      hud.setObjective(objectiveFor(scene));
       hud.setMinimapData(scene.minimapMarkers, scene.illuminationFraction);
       hud.update(dt, scene.player.object3D.position, scene.cameraForward);
+      touch.update();
       soundBoard.updateListener(renderer.camera);
       ui.update(dt);
       renderer.updateAdaptiveResolution(loop.fps, dt);
       debug?.update(dt, loop, scene.controller, scene.player.object3D.position);
     },
-    interpolate: (alpha) => scene.interpolate(alpha),
     lateUpdate: (dt) => scene.lateUpdate(dt),
     render: () => scene.render(),
     endFrame: () => input.endFrame(),
@@ -211,6 +280,27 @@ async function bootstrap(): Promise<void> {
   }
 }
 
+/** What the HUD should say the player is doing right now. */
+function objectiveFor(scene: PlanetScene): Objective | null {
+  if (scene.isMenuMode) return null;
+  const target = scene.objectiveTarget;
+  if (!target) {
+    return { title: t('objective.done.title'), hint: t('objective.done.hint'), position: null };
+  }
+  if (target.kind === 'course') {
+    return { title: COURSES[0]?.name ?? '', hint: t('objective.course.hint'), position: target.position };
+  }
+  if (target.kind === 'deliver') {
+    return { title: target.title, hint: target.hint, position: target.position };
+  }
+  const first = scene.quests.completedCount === 0;
+  return {
+    title: t(first ? 'objective.first.title' : 'objective.next.title'),
+    hint: t(first ? 'objective.first.hint' : 'objective.next.hint'),
+    position: target.position,
+  };
+}
+
 /**
  * Fetch and register the soundtrack.
  *
@@ -219,11 +309,7 @@ async function bootstrap(): Promise<void> {
  * buffers land, and the browser's autoplay policy is satisfied by the first
  * input the player makes anyway.
  */
-async function loadAudio(
-  assets: AssetManager,
-  soundBoard: SoundBoard,
-  save: SaveManager,
-): Promise<void> {
+async function loadAudio(assets: AssetManager, soundBoard: SoundBoard, save: SaveManager): Promise<void> {
   try {
     await assets.loadManifest(`${import.meta.env.BASE_URL}assets/manifest.json`);
     await Promise.all([
@@ -240,28 +326,29 @@ async function loadAudio(
 }
 
 /** Push the main menu, with Settings reachable from it. */
-function showMainMenu(
-  bus: EventBus,
-  ui: UIManager,
-  settings: SettingsManager,
-  save: SaveManager,
-  onResetProgress: () => void,
-): void {
+function showMainMenu(game: Game): void {
+  const { bus, ui, settings, save, scene } = game;
   const completed = save.get().progress.completedContracts.length;
+  const journal = scene.journal;
   ui.popAll();
   ui.push(
     new MainMenuScreen(
       bus,
-      { completed, total: CONTRACTS.length, hasProgress: completed > 0 },
+      {
+        completed,
+        total: CONTRACTS.length,
+        hasProgress: completed > 0 || journal.points > 0,
+        journal: journal.points,
+        journalTotal: journal.total,
+      },
       () => {
         ui.push(
           new SettingsScreen(bus, settings, () => ui.pop(), () => {
             // Reset wipes the save and the live world together, so the menu the
             // player returns to matches what is actually stored.
-            save.reset();
-            onResetProgress();
+            resetEverything(game);
             ui.pop();
-            showMainMenu(bus, ui, settings, save, onResetProgress);
+            showMainMenu(game);
           }),
         );
       },
@@ -269,26 +356,23 @@ function showMainMenu(
   );
 }
 
+function resetEverything(game: Game): void {
+  game.save.reset();
+  game.scene.resetRun();
+  game.album = {};
+  storeAlbum(game.album);
+  game.hud.setJournal(game.scene.journal.points, game.scene.journal.total, game.scene.journal.rank.title);
+}
+
 /** Start and quit, both behind the iris wipe. */
-function wireMenuFlow(
-  bus: EventBus,
-  ui: UIManager,
-  settings: SettingsManager,
-  scene: PlanetScene,
-  state: GameStateManager,
-  save: SaveManager,
-  hud: Hud,
-  runClock: { startedAt: number },
-  audio: AudioManager,
-): void {
+function wireMenuFlow(game: Game): void {
+  const { bus, ui, save, scene, state, hud, audio, runClock } = game;
+
   bus.on('ui:requestStart', ({ newRun }) => {
     // The iris closes over the menu, the world changes behind it, and it opens
     // on the surface — so the cut from orbit to ground is never seen.
     void ui.transitions.wrap(() => {
-      if (newRun) {
-        save.reset();
-        scene.resetRun();
-      }
+      if (newRun) resetEverything(game);
       ui.popAll();
       state.send('startRun');
       state.send('worldReady');
@@ -296,6 +380,20 @@ function wireMenuFlow(
       hud.setVisible(true);
       runClock.startedAt = performance.now();
       audio.ambience.setDistrict(scene.currentDistrictId, 1.2);
+
+      // The story's first page, once per run.
+      if (!scene.journal.introSeen) {
+        scene.setPaused(true);
+        hud.setVisible(false);
+        ui.push(
+          new IntroScreen(() => {
+            scene.journal.markIntroSeen();
+            ui.popAll();
+            hud.setVisible(true);
+            scene.setPaused(false);
+          }),
+        );
+      }
     });
   });
 
@@ -305,9 +403,10 @@ function wireMenuFlow(
       // The menu sits in orbit, so the world's ambience has no business
       // playing over it.
       audio.ambience.silence();
+      scene.setPhotoMode(false);
       scene.setMenuMode(true);
       hud.setVisible(false);
-      showMainMenu(bus, ui, settings, save, () => scene.resetRun());
+      showMainMenu(game);
     });
   });
 }
@@ -377,24 +476,105 @@ async function attachCharacter(scene: PlanetScene): Promise<void> {
   }
 }
 
-function wirePauseFlow(
-  bus: EventBus,
-  ui: UIManager,
-  settings: SettingsManager,
-  scene: PlanetScene,
-  state: GameStateManager,
-  audio: AudioManager,
-  runClock: { startedAt: number },
-): void {
+/** The journal as the screen draws it. */
+function journalView(game: Game): JournalView {
+  const { scene, album } = game;
+  const journal = scene.journal;
+  const next = journal.nextRank;
+
+  const story = CONTRACTS.map((contract) => {
+    const record = scene.quests.get(contract.id);
+    const district = DISTRICTS.find((d) => d.id === contract.district)?.displayName ?? contract.district;
+    const recipient = npcById(contract.recipient)?.displayName ?? contract.recipient;
+    const state = record?.state ?? 'locked';
+    if (state === 'completed') {
+      return {
+        title: contract.title,
+        detail: `Delivered to ${recipient}. ${district} is lit.`,
+        state: 'done' as const,
+        tag: record?.rating ? t(`rating.${record.rating}`) : '',
+      };
+    }
+    if (state === 'accepted' || state === 'carrying') {
+      return { title: contract.title, detail: contract.hint, state: 'now' as const, tag: 'Carrying' };
+    }
+    if (state === 'available') {
+      return { title: contract.title, detail: 'Postmaster Odd has this parcel ready.', state: 'now' as const, tag: 'Next' };
+    }
+    return { title: `A parcel for ${district}`, detail: 'After the one before it.', state: 'later' as const };
+  });
+
+  return {
+    rank: journal.rank.title,
+    points: journal.points,
+    total: journal.total,
+    next: next ? { title: next.title, need: next.at - journal.points, reward: next.reward?.name ?? null } : null,
+    story,
+    stamps: STAMPS.map((stamp) => ({
+      title: stamp.name,
+      note: stamp.note,
+      hint: stamp.hint,
+      seal: stamp.seal,
+      found: journal.has('stamp', stamp.id),
+    })),
+    souvenirs: SOUVENIRS.map((item) => ({
+      title: item.name,
+      note: item.note,
+      hint: item.hint,
+      found: journal.has('souvenir', item.id),
+    })),
+    postcards: POSTCARDS.map((card) => ({
+      title: card.title,
+      note: 'In the album.',
+      hint: card.brief,
+      found: journal.has('postcard', card.id),
+      image: album[card.id] ?? null,
+    })),
+    feats: [
+      ...COURSES.map((course) => {
+        const best = journal.courseBest(course.id);
+        const medal = journal.medal(course.id);
+        return {
+          title: course.name,
+          note: `Best ${best?.toFixed(1) ?? '—'} s${medal ? ` · ${medal} medal` : ''}. Gold is ${course.gold} s.`,
+          hint: `Ring the bell east of the post office and light every lantern. Bronze is ${course.bronze} s.`,
+          found: medal !== null,
+        };
+      }),
+      {
+        title: 'Friend of cats',
+        note: `${journal.count('cat')} cat${journal.count('cat') === 1 ? ' has' : 's have'} decided you are acceptable.`,
+        hint: 'Pet a cat twice and it will remember you.',
+        found: journal.count('cat') > 0,
+      },
+      {
+        title: 'Lumen shards',
+        note: `${scene.shards.collected} of ${scene.shards.total} gathered.`,
+        hint: 'Small lights lying about the planet. Walk through one.',
+        found: scene.shards.collected > 0,
+      },
+    ],
+  };
+}
+
+function wirePauseFlow(game: Game): void {
+  const { bus, ui, settings, scene, state, audio, runClock, hud } = game;
+
   const pauseScreen = new PauseScreen(bus, settings, () => ({
     elapsedSeconds: (performance.now() - runClock.startedAt) / 1000,
-    contractsComplete: 0,
-    shards: 0,
+    delivered: scene.quests.completedCount,
+    deliveries: CONTRACTS.length,
+    shards: scene.shards.collected,
+    shardTotal: scene.shards.total,
+    journal: scene.journal.points,
+    journalTotal: scene.journal.total,
+    rank: scene.journal.rank.title,
   }));
 
   const pause = () => {
     if (scene.isMenuMode) return;
     if (!state.send('pause')) return;
+    scene.setPhotoMode(false);
     scene.setPaused(true);
     ui.setHudVisible(false);
     ui.push(pauseScreen);
@@ -402,9 +582,13 @@ function wirePauseFlow(
   };
 
   const resume = () => {
+    // The festival card holds her still without stopping the world.
+    const fromReport = state.current === 'complete';
     if (!state.send('resume')) return;
+    if (fromReport) scene.setPlayerLocked(false);
     ui.popAll();
     ui.setHudVisible(true);
+    hud.setVisible(true);
     scene.setPaused(false);
     applyAudioSettings(audio, settings);
   };
@@ -416,6 +600,26 @@ function wirePauseFlow(
     if (state.current === 'paused') state.send('resume');
     scene.setPaused(false);
     applyAudioSettings(audio, settings);
+  });
+
+  // The journal opens over the game or over the pause menu, and closes back
+  // to whichever it came from.
+  bus.on('ui:requestJournal', () => {
+    if (scene.isMenuMode || ui.top?.id === 'journal' || ui.top?.id === 'intro') return;
+    const fromPause = state.current === 'paused';
+    if (!fromPause) {
+      if (!state.send('pause')) return;
+      scene.setPhotoMode(false);
+      scene.setPaused(true);
+      ui.setHudVisible(false);
+      audio.duck(0.5);
+    }
+    ui.push(
+      new JournalScreen(journalView(game), () => {
+        ui.pop();
+        if (!fromPause) resume();
+      }),
+    );
   });
 
   // Escape is owned entirely by UIManager: with no screen open it emits
@@ -434,24 +638,25 @@ bootstrap().catch((error) => fail(t('error.boot'), error));
  * UI reacts. Nothing in this function reaches into gameplay state to mutate it,
  * which is what keeps the UI swappable (docs/10-ui-flow.md §10.3).
  */
-function wireGameplay(
-  bus: EventBus,
-  ui: UIManager,
-  scene: PlanetScene,
-  save: SaveManager,
-  hud: Hud,
-  state: GameStateManager,
-): void {
+function wireGameplay(game: Game): void {
+  const { bus, ui, scene, save, hud, state } = game;
+
   bus.on('ui:requestDialogueAdvance', () => scene.dialogue.advance());
 
   bus.on('district:lit', ({ district, litCount }) => {
     // Districts are identified by id on the bus; the player sees the name.
     const name = DISTRICTS.find((d) => d.id === district)?.displayName ?? district;
     ui.showToast(t('toast.districtLit', { name, count: litCount, total: DISTRICTS.length }));
+    save.update((draft) => {
+      if (!draft.progress.litDistricts.includes(district)) draft.progress.litDistricts.push(district);
+    });
   });
 
-  bus.on('shard:collected', ({ total, of }) => {
-    ui.showToast(t('toast.shard', { count: total, total: of }), 2500, 'shard');
+  bus.on('shard:collected', ({ id, total, of }) => {
+    ui.showToast(t('toast.shard', { count: total, total: of }), 2200, 'shard');
+    save.update((draft) => {
+      if (!draft.progress.collectedShards.includes(id)) draft.progress.collectedShards.push(id);
+    });
   });
 
   bus.on('delivery:completed', ({ contractId, rating }) => {
@@ -464,12 +669,23 @@ function wireGameplay(
     ui.showToast(t('toast.delivered', { rating: t(`rating.${rating}`) }));
   });
 
-  bus.on('district:lit', ({ district }) => {
+  // The journal is saved whenever it changes.
+  bus.on('journal:changed', () => {
+    const snapshot = scene.journal.snapshot();
     save.update((draft) => {
-      if (!draft.progress.litDistricts.includes(district)) {
-        draft.progress.litDistricts.push(district);
-      }
+      draft.progress.journal = snapshot;
     });
+  });
+
+  bus.on('photo:developed', ({ id, image }) => {
+    game.album[id] = image;
+    storeAlbum(game.album);
+  });
+
+  bus.on('course:started', () => ui.showToast(t('toast.courseStart'), 2600));
+  bus.on('course:abandoned', () => ui.showToast(t('toast.courseLost'), 3200));
+  bus.on('cat:petted', ({ friend }) => {
+    if (friend) ui.showToast(t('toast.catFriend'), 2600);
   });
 
   bus.on('run:completed', ({ seconds, ratings, districtsLit }) => {
@@ -478,33 +694,33 @@ function wireGameplay(
       draft.stats.runsCompleted++;
       if (best === null || seconds < best) draft.stats.bestRunSeconds = seconds;
     });
+    bus.emit('festival:started');
 
-    // The report is a modal, like the pause menu: the run is `complete`, which
-    // draws the world but does not simulate it. It used to stay `playing`, and
-    // that is why its button never worked: input was still live, so pressing
-    // the mouse on "Keep exploring" took the pointer lock for mouse look, and
-    // the click went to the canvas instead of the button. Pausing the scene
-    // turns input off and lets the pointer go; resuming (wirePauseFlow) takes
-    // `complete` back to `playing` and closes the report.
-    state.send('finalDelivery');
-    scene.setPaused(true);
-    hud.setVisible(false);
-    ui.push(
-      new RouteReportScreen(bus, {
-        seconds,
-        ratings,
-        shards: scene.shards.collected,
-        shardTotal: scene.shards.total,
-        districtsLit,
-        bestSeconds: best,
-      }),
-    );
+    // Let the last district catch and the first fireworks go up before the
+    // card comes down over them.
+    window.setTimeout(() => {
+      if (scene.isMenuMode || state.current !== 'playing') return;
+      state.send('finalDelivery');
+      // The world goes on — the fireworks are the point — but she stands still.
+      scene.setPhotoMode(false);
+      scene.setPlayerLocked(true);
+      hud.setVisible(false);
+      ui.push(
+        new RouteReportScreen(bus, {
+          seconds,
+          ratings,
+          shards: scene.shards.collected,
+          shardTotal: scene.shards.total,
+          districtsLit,
+          districtTotal: DISTRICTS.length,
+          bestSeconds: best,
+          rank: scene.journal.rank.title,
+          journal: scene.journal.points,
+          journalTotal: scene.journal.total,
+        }),
+      );
+    }, 4200);
   });
-
-  // "Keep exploring" from the report simply closes it — the lit planet is
-  // still there, and the shards are still worth hunting. The pause flow's
-  // resume does the closing; this brings the HUD back.
-  bus.on('ui:requestResume', () => hud.setVisible(true));
 }
 
 function chosenQuality(saved: 'auto' | QualityTier): QualityTier | undefined {
